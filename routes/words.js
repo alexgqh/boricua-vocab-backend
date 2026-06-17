@@ -1,13 +1,14 @@
 import { Router } from 'express'
 import { doesWordExist } from '../services/wordsService.js'
-import { autofillData } from '../services/aiService.js'
+import { translateContents, autofillData } from '../services/aiService.js'
 import { pool } from '../db/connection.js'
 
 const router = Router()
 
 router.get('/', fetchAll)
+router.post('/translate', translate)
 router.post('/stage', stageWords)
-router.post('/add', addWords)
+router.post('/commit', commitWords)
 
 async function fetchAll(req, res) {
   //Return all words
@@ -22,6 +23,22 @@ async function fetchAll(req, res) {
       error: 'Database error'
     })
   }
+}
+
+async function translate(req, res) {
+  const { contents, langFrom } = req.body
+
+  if (!contents || !langFrom) {
+    return res.status(400).json({ message: 'The required information was not provided' })
+  }
+
+  const translation = await translateContents(contents, langFrom)
+
+  if (!translation) {
+    return res.status(500).json({ message: 'Translation error' })
+  }
+
+  res.json({ contents, translation })
 }
 
 async function stageWords(req, res) {
@@ -52,10 +69,10 @@ async function stageWords(req, res) {
     })
   }
 
-  return res.status(200).json(jsonArray)
+  return res.json(jsonArray)
 }
 
-async function addWords(req, res) {
+async function commitWords(req, res) {
   const { data } = req.body
   const fields = Object.keys(data[0])
   const placeholders = data
@@ -74,7 +91,7 @@ async function addWords(req, res) {
     return res.status(500).json({ error: "Database error" })
   }
 
-  return res.status(200).json({ message: `${data.length} words added successfully` })
+  return res.json({ message: `${data.length} words added successfully` })
 }
 
 export default router
