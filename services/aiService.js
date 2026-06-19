@@ -22,7 +22,7 @@ export async function translateContents(contents, langFrom) {
   return await runPrompt(prompt)
 }
 
-export async function autofillData(wordPairs) {
+export async function categorizeWordPairs(wordPairs) {
   const data = wordPairs.filter(pair => pair.en?.trim() || pair.sp?.trim())
   if (data.length === 0) {
     return []

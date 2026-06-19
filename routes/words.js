@@ -1,6 +1,6 @@
 import { Router } from 'express'
-import { doesWordExist } from '../services/wordsService.js'
-import { translateContents, autofillData } from '../services/aiService.js'
+import { findExistingReferences } from '../utils/findExistingReferences.js'
+import { translateContents, categorizeWordPairs } from '../services/aiService.js'
 import { pool } from '../db/connection.js'
 
 const router = Router()
@@ -42,34 +42,39 @@ async function translate(req, res) {
 }
 
 async function stageWords(req, res) {
-  const { words } = req.body
-  let jsonArray = []
+  const { wordPairs } = req.body
 
-  for (const word of words) {
-    const result = await doesWordExist(word)
-  
-    if (!result.success) {
-      return res.status(500).json({
-        error: 'Database error'
-      })
-    }
-  
-    const data = autofillData(word)
-  
-    if (!data) {
-      return res.status(500).json({
-        error: 'Failed to generate word data'
-      })
-    }
-  
-    jsonArray.push({
-      action: result.exists ? 'warn' : 'ok',
-      similar: result.similar,
-      data
+  if (!Array.isArray(wordPairs) || wordPairs.length === 0) {
+    return res.status(400).json({
+      message: 'No words provided'
     })
   }
 
-  return res.json(jsonArray)
+  try {
+    const categorizedData = await categorizeWordPairs(wordPairs)
+
+    //Enrich data with checks to see if any of the words already exist in the db
+    const enrichedData = await Promise.all(
+      categorizedData.map(async record => {
+        const allSpanish = record.spanish.split(' / ')
+        const allEnglish = record.english.split(' / ')
+        const [sp, en] = await Promise.all(
+          await findExistingReferences(allSpanish, 'sp'),
+          await findExistingReferences(allEnglish, 'en')
+        )
+        return { ...record, exists: { sp, en } }
+      })
+    )
+
+    res.json(enrichedData)
+  }
+  catch (err) {
+    console.error(err)
+
+    return res.status(500).json({
+      message: 'Internal server error'
+    })
+  }
 }
 
 async function commitWords(req, res) {

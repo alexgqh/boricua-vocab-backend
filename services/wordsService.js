@@ -1,10 +1,11 @@
 import { pool } from '../db/connection.js'
 
-async function doesWordExist(word) {
+async function doesWordExist(word, lang) {
   try {
+    const field = (lang === 'sp') ? 'spanish' : 'english'
     const [similar] = await pool.query(
-      'SELECT * FROM dictionary WHERE spanish LIKE ?',
-      [`%${word}%`]
+      'SELECT ? FROM dictionary WHERE ? LIKE ?',
+      [field, field, `%${word}%`]
     )
 
     return {
