@@ -62,7 +62,7 @@ async function stageWords(req, res) {
           await findExistingReferences(allSpanish, 'sp'),
           await findExistingReferences(allEnglish, 'en')
         )
-        return { ...record, exists: { sp, en } }
+        return { record, exists: { sp, en } }
       })
     )
 
