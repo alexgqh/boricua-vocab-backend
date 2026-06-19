@@ -219,4 +219,4 @@ Before generating the final output:
 
 Only generate the final response after all checks pass.
 
-INPUT (JSON format): ${INPUT}
+INPUT (JSON format): <INPUT>
