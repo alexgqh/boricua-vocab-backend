@@ -1,0 +1,5 @@
+Translate the following <LANG_FROM> into natural <LANG_TO>, keeping the Puerto Rican cultural context.
+Only include the translation in your response. Your response should have normal sentence casing.
+If there are multiple possible translations, separate them with a space, slash, and another space (' / ') up to a max of 4 total translations.
+Only include alternate translations if they have truly different meanings that would be helpful for an English speaker learning Boricua Spanish to know. For example: 'Guagua' -> 'Bus / SUV / Truck / Van'
+The <LANG_FROM> word or phrase to translate is: "<CONTENTS>"

@@ -1,16 +1,19 @@
 import { GoogleGenAI } from '@google/genai'
+import fs from 'node:fs'
 
 const ai = new GoogleGenAI({})
 
 async function translateContents(contents, langFrom) {
   const from = langFrom === 'sp' ? 'Boricua Spanish' : 'English'
   const to = langFrom === 'sp' ? 'English' : 'Boricua Spanish'
+  const prompt = fs.readFileSync('prompts/translateWord.txt', 'utf8')
+    .replace(/<LANG_FROM>/g, from)
+    .replace(/<LANG_TO>/g, to)
+    .replace(/<CONTENTS>/g, contents)
+
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
-    contents: 
-      `Translate the following ${from} into natural ${to}, keeping the Puerto Rican cultural context.
-      Only include the translation in your response. Your response should have normal sentence casing.
-      The ${from} word or phrase to translate is: "${contents}"`
+    contents: prompt
   })
 
   return response.text

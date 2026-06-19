@@ -1,0 +1,222 @@
+You are helping me import Puerto Rican Spanish vocabulary into a MySQL database.
+
+Your task is to analyze every vocabulary term provided in a comma-delimited list
+and generate a JSON array containing one object per input term.
+
+The input will be a JSON array, where each element is an object with a 'sp' and an 'en' field. For example:
+[{"sp"="Guagua","en"="Bus / SUV / Truck / Van"}]
+Both phrases and words may be provided.
+
+If only the 'en' field is populated, convert it to the most natural Puerto Rican Spanish
+equivalent before generating the JSON object.
+
+If only the 'sp' field is populated, convert it to the most natural English equivalent before generating the JSON object. If there are multiple possible translations into English from Spanish, separate them with a space, slash, and another space (' / ') up to a max of 4 total translations.
+Only include alternate translations if they have truly different meanings. For example: 'Guagua' -> 'Bus / SUV / Truck / Van'
+
+Always prefer Puerto Rican Spanish when multiple valid Spanish translations
+exist.
+
+Use the Spanish word exactly as it appears unless there is an obvious spelling
+or accent error. If you correct a spelling mistake, also correct the English
+translation if necessary.
+
+DATABASE SCHEMA
+
+Each JSON object MUST contain ALL of the following fields:
+
+{ "spanish": string, "gender": "M" | "F" | "U", "gender_type": "regular" |
+"common" | "epicene" | null, "english": string, "literal": string | null,
+"part_of_speech": integer, "theme": integer, "difficulty": integer, "note":
+string | null, "example": string | null, "example_translation": string | null,
+"vulgar": 1 | null, "loan_word": 1 | null }
+
+COLUMN DEFINITIONS
+
+spanish: VARCHAR(128)
+
+english: VARCHAR(128)
+
+literal: VARCHAR(128)
+
+gender: CHAR(1)
+
+Allowed values: "M" = masculine "F" = feminine "U" = ungendered
+
+Use: "M" or "F" for nouns with grammatical gender. "U" for nouns with regular or
+common gender (outlined below).
+
+gender_type: ENUM('regular','common','epicene')
+
+Use: "regular" = normal noun gender
+
+Examples: Libro Casa Ciego/a Inquilino/a
+
+"common" = common-gender nouns where only the article changes
+
+Examples: el/la Estudiante el/la Guardia el/la Cantante el/la Genio
+
+"epicene" = epicene nouns whose grammatical gender never changes
+
+Examples: la Persona la Víctima el Gorila
+
+null = any entry that is not a noun
+
+PART OF SPEECH IDs
+
+Choose the SINGLE BEST part_of_speech ID.
+
+1 = Noun 2 = Verb 3 = Adjective 4 = Adverb 5 = Phrase 6 = Idiom 7 = Interjection
+
+THEME IDs
+
+Choose the SINGLE BEST theme ID.
+
+If multiple themes could apply, choose the MOST SPECIFIC theme.
+
+1 = Everyday Life 2 = Home & Furniture 3 = Food & Cooking 4 = Family &
+Relationships 5 = People & Personality 6 = Emotions & Feelings 7 = Body & Health
+8 = Clothing & Appearance 9 = Work & School 10 = Technology & Internet 11 =
+Transportation & Vehicles 12 = Travel & Tourism 13 = Shopping & Money 14 =
+Nature & Weather 15 = Animals 16 = Sports & Recreation 17 = Government & Legal
+18 = Religion & Spirituality 19 = Culture & Entertainment 20 = Puerto Rican
+Slang 21 = Puerto Rican Food 22 = Puerto Rican Culture 23 = Puerto Rican Places
+24 = Puerto Rican Everyday Speech
+
+Examples:
+
+Mofongo → 21 Alcapurria → 21
+
+Jíbaro → 22 Parranda → 22
+
+Vieques → 23 El Yunque → 23
+
+Guagua → 24 China (Orange) → 24
+
+Vacilón → 20 Brutal → 20
+
+DIFFICULTY IDs
+
+Estimate difficulty from the perspective of an English-speaking adult learning
+Puerto Rican Spanish.
+
+1 = Beginner 2 = Intermediate 3 = Advanced 4 = Native-Level / Rare
+
+Guidelines:
+
+Beginner: Very common everyday vocabulary. Typically learned early.
+
+Intermediate: Common conversational vocabulary. Frequently encountered in Puerto
+Rico.
+
+Advanced: Less common vocabulary. Specialized, abstract, or less frequently
+encountered.
+
+Native-Level / Rare: Highly regional expressions. Rare slang. Uncommon
+vocabulary. Literary or advanced expressions.
+
+LITERAL TRANSLATION RULES
+
+Only populate "literal" when the literal translation differs meaningfully from
+the primary English translation.
+
+Examples:
+
+despeinado english = Disheveled literal = Uncombed
+
+rompecabezas english = Puzzle literal = Head-breaker
+
+Otherwise set "literal" to null.
+
+NOTE RULES
+
+Only populate "note" when the information would genuinely help a learner.
+
+Examples:
+
+  - Puerto Rican usage notes
+  - Cultural context
+  - Regional differences
+  - Important grammatical details
+
+Additionally, populate "note" when multiple translations exist for the same English word.
+For example, "Cup" in English can be "Copa," "Taza," or "Vaso" in Spanish, depending on the type of cup. Provide a note that tells an English speaker about these differences, and the alternatives that exist in Spanish which all have the same English translation. (Example note for "Taza": "Used for a type of coffee cup
+
+Otherwise set note to null.
+
+EXAMPLE SENTENCE RULES
+
+Every entry should have an example sentence whenever reasonably possible.
+
+Example sentences should:
+
+  - Sound natural
+  - Use Puerto Rican Spanish when appropriate
+  - Clearly demonstrate the meaning
+  - Be concise
+  - Preferably 5–15 words
+
+Provide an English translation of every example sentence.
+
+CAPITALIZATION RULES
+
+spanish, english, example, example_translation: Normal sentence capitalization.
+
+VULGAR RULES
+
+Set vulgar = 1 only if the term is vulgar, profane, obscene, or commonly
+considered offensive.
+
+Otherwise: vulgar = null
+
+LOAN WORD RULES
+
+Set loan_word = 1 only if the Spanish term is a loanword borrowed from English
+
+Examples:
+
+handle parking sandwich
+
+Otherwise set loan_word to null.
+
+OUTPUT REQUIREMENTS
+
+-Generate JSON ONLY. -Do not provide explanations. -Do not provide commentary.
+-Do not provide markdown. -Do not provide code fences. -Output ONLY a single
+valid JSON array. -The output must be directly parseable by a JSON parser
+without modification.
+
+Requirements:
+
+  - Use double quotes only
+  - No trailing commas
+  - No comments
+  - No markdown
+  - No code fences
+
+Do not include carriage returns or line breaks inside any field value.
+
+If multiple translations are necessary, separate them using:
+
+" / "
+
+Example:
+
+{ "spanish": "Revolú", "english": "Mess / Disorder / Chaos", ... }
+
+Use multiple entries only when genuinely necessary.
+
+QUALITY CHECKS
+
+Before generating the final output:
+
+1.  Ensure that exactly one JSON object has been generated for every input term.
+2.  Ensure every JSON object contains every required field.
+3.  Ensure all enum values are valid.
+4.  Ensure all foreign key IDs are valid.
+5.  Ensure the output is valid JSON. Use escape characters where necessary.
+6.  If uncertain about a classification, choose the most likely option rather
+    than skipping the term.
+
+Only generate the final response after all checks pass.
+
+INPUT (JSON format): ${INPUT}
