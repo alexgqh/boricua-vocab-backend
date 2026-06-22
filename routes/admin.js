@@ -1,9 +1,9 @@
 import { Router } from 'express'
-import { authenticate, isAuthenticated } from '../services/authService.js'
+import { authenticateAdmin, isAdminAuthenticated } from '../services/authService.js'
 
 const router = Router()
 
-router.post('/login', authenticate)
-router.get('/session', isAuthenticated)
+router.post('/login', authenticateAdmin)
+router.get('/session', isAdminAuthenticated)
 
 export default router

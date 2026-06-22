@@ -1,11 +1,11 @@
-// 1. Load the environment variables first!
+// 1. Load the environment variables
 import 'dotenv/config'
 import crypto from 'crypto'
 import { pool } from '../db/connection.js'
 
 const MS_IN_DAY = 86400000
 
-async function authenticate(req, res) {
+export async function authenticateAdmin(req, res) {
   const { username, password } = req.body
 
   if (
@@ -33,7 +33,7 @@ async function authenticate(req, res) {
     .json({ message: 'Login successful' })
 }
 
-async function isAuthenticated(req, res) {
+export async function isAdminAuthenticated(req, res) {
   const cookie = req.cookies?.auth
 
   if (!cookie) {
@@ -70,5 +70,3 @@ async function isAuthenticated(req, res) {
 
   res.json({ authenticated: true, message: 'Authentication successful' })
 }
-
-export { authenticate, isAuthenticated }
