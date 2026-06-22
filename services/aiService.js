@@ -12,8 +12,8 @@ async function runPrompt(prompt) {
 }
 
 export async function translateContents(contents, langFrom) {
-  const from = langFrom === 'sp' ? 'Boricua Spanish' : 'English'
-  const to = langFrom === 'sp' ? 'English' : 'Boricua Spanish'
+  const from = langFrom === 'es' ? 'Boricua Spanish' : 'English'
+  const to = langFrom === 'es' ? 'English' : 'Boricua Spanish'
   const prompt = fs.readFileSync('prompts/translateWord.txt', 'utf8')
     .replace(/<LANG_FROM>/g, from)
     .replace(/<LANG_TO>/g, to)
@@ -23,7 +23,7 @@ export async function translateContents(contents, langFrom) {
 }
 
 export async function categorizeWordPairs(wordPairs) {
-  const data = wordPairs.filter(pair => pair.en?.trim() || pair.sp?.trim())
+  const data = wordPairs.filter(pair => pair.en?.trim() || pair.es?.trim())
   if (data.length === 0) {
     return []
   }

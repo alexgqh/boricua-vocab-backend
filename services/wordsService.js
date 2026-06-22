@@ -21,7 +21,7 @@ export async function getWordBank(req, res) {
 
 export async function doesWordExist(word, lang) {
   try {
-    const field = (lang === 'sp') ? 'spanish' : 'english'
+    const field = (lang === 'es') ? 'spanish' : 'english'
     const [similar] = await pool.query(
       'SELECT ? FROM wordbank WHERE ? LIKE ?',
       [field, field, `%${word}%`]
@@ -79,11 +79,11 @@ export async function stageWords(req, res) {
       categorizedData.map(async record => {
         const allSpanish = record.spanish.split(' / ')
         const allEnglish = record.english.split(' / ')
-        const [sp, en] = await Promise.all(
-          await findExistingReferences(allSpanish, 'sp'),
+        const [es, en] = await Promise.all(
+          await findExistingReferences(allSpanish, 'es'),
           await findExistingReferences(allEnglish, 'en')
         )
-        return { record, exists: { sp, en } }
+        return { record, exists: { es, en } }
       })
     )
 
