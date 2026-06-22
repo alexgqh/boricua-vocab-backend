@@ -7,7 +7,7 @@ import { findExistingReferences } from '../utils/findExistingReferences.js'
 export async function getWordBank(req, res) {
   //Return all words
   try {
-    const [result] = await pool.query('SELECT * FROM dictionary;')
+    const [result] = await pool.query('SELECT * FROM wordbank;')
     res.status(200).json(result)
   }
   catch (err) {
@@ -23,7 +23,7 @@ export async function doesWordExist(word, lang) {
   try {
     const field = (lang === 'sp') ? 'spanish' : 'english'
     const [similar] = await pool.query(
-      'SELECT ? FROM dictionary WHERE ? LIKE ?',
+      'SELECT ? FROM wordbank WHERE ? LIKE ?',
       [field, field, `%${word}%`]
     )
 
@@ -108,7 +108,7 @@ export async function commitWords(req, res) {
     )
     .join(',')
   
-  const sql = `INSERT INTO dictionary (${fields.join(',')}) VALUES ${placeholders};`
+  const sql = `INSERT INTO wordbank (${fields.join(',')}) VALUES ${placeholders};`
 
   try {
     pool.query(sql, data.flatMap(row => Object.values(row)))
