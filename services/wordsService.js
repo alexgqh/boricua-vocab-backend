@@ -1,7 +1,7 @@
 import { pool } from '../db/connection.js'
 import { translateContents } from '../services/aiService.js'
 import { categorizeWordPairs } from '../services/aiService.js'
-import { getAllWordReferences } from '../utils/getAllWordReferences.js'
+import { getAllExistingReferences } from '../utils/getAllWordReferences.js'
 
 //words
 export async function getWordBank(req, res) {
@@ -19,7 +19,7 @@ export async function getWordBank(req, res) {
   }
 }
 
-export async function getWordReferences(word, language) {
+export async function getExistingReferences(word, language) {
   try {
     const field = (language === 'es') ? 'spanish' : 'english'
     const [references] = await pool.query(
@@ -71,15 +71,15 @@ export async function translate(req, res) {
 //admin/stage
 export async function stageWords(req, res) {
 
-  async function enrichData(data) {
+  async function attachAllExistingReferences(data) {
     try {
       const enrichedData = await Promise.all(
         data.map(async record => {
           const allSpanish = record.spanish.split(' / ')
           const allEnglish = record.english.split(' / ')
           const [spanish, english] = await Promise.all(
-            getAllWordReferences(allSpanish, 'es'),
-            getAllWordReferences(allEnglish, 'en')
+            getAllExistingReferences(allSpanish, 'es'),
+            getAllExistingReferences(allEnglish, 'en')
           )
           return { record, existing: { spanish, english } }
         })
@@ -105,8 +105,8 @@ export async function stageWords(req, res) {
   
   try {
     let data = wordPairs
-    for (const processingFunction of [categorizeWordPairs, enrichData]) {
-      //Call categorizeWordPairs() and then enrichData() on its successful result
+    for (const processingFunction of [categorizeWordPairs, attachAllExistingReferences]) {
+      //Call categorizeWordPairs() and then attachAllExistingReferences() on its successful result
       const response = await processingFunction(data)
 
       if (!response.success) {
