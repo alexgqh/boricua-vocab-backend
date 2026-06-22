@@ -1,7 +1,7 @@
 import { pool } from '../db/connection.js'
 import { translateContents } from '../services/aiService.js'
 import { categorizeWordPairs } from '../services/aiService.js'
-import { findExistingReferences } from '../utils/findExistingReferences.js'
+import { getAllWordReferences } from '../utils/getAllWordReferences.js'
 
 //words
 export async function getWordBank(req, res) {
@@ -19,18 +19,18 @@ export async function getWordBank(req, res) {
   }
 }
 
-export async function doesWordExist(word, lang) {
+export async function getWordReferences(word, language) {
   try {
-    const field = (lang === 'es') ? 'spanish' : 'english'
-    const [similar] = await pool.query(
+    const field = (language === 'es') ? 'spanish' : 'english'
+    const [references] = await pool.query(
       'SELECT ? FROM wordbank WHERE ? LIKE ?',
       [field, field, `%${word}%`]
     )
 
     return {
       success: true,
-      exists: similar.length > 0,
-      similar
+      exists: references.length > 0,
+      references
     }
   }
   catch (err) {
@@ -39,7 +39,7 @@ export async function doesWordExist(word, lang) {
     return {
       success: false,
       exists: false,
-      similar: null
+      references: null
     }
   }
 }
@@ -80,10 +80,10 @@ export async function stageWords(req, res) {
         const allSpanish = record.spanish.split(' / ')
         const allEnglish = record.english.split(' / ')
         const [es, en] = await Promise.all(
-          await findExistingReferences(allSpanish, 'es'),
-          await findExistingReferences(allEnglish, 'en')
+          await getAllWordReferences(allSpanish, 'es'),
+          await getAllWordReferences(allEnglish, 'en')
         )
-        return { record, exists: { es, en } }
+        return { record, references: { es, en } }
       })
     )
 
