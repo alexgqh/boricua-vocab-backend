@@ -14,7 +14,7 @@ import { getExistingReferences } from '../services/wordsService.js'
       []
     ]
 */
-export async function getAllExistingReferences(words, language, id) {
+export async function getAllExistingReferences(words, language) {
   //Get an array of results
   const results = await Promise.all(
     words.map(word => getExistingReferences(word, language))
@@ -25,5 +25,5 @@ export async function getAllExistingReferences(words, language, id) {
     .filter(result => result.success && result.exists)
     .map(result => result.references) //array of { spanish, english }
 
-  return { id, references }
+  return references
 }

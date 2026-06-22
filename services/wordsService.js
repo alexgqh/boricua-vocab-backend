@@ -1,7 +1,7 @@
 import { pool } from '../db/connection.js'
 import { translateContents } from '../services/aiService.js'
 import { categorizeWordPairs } from '../services/aiService.js'
-import { getAllExistingReferences } from '../utils/getAllWordReferences.js'
+import { getAllExistingReferences } from '../utils/getAllExistingReferences.js'
 
 //words
 export async function getWordBank(req, res) {
@@ -75,13 +75,13 @@ export async function stageWords(req, res) {
     try {
       const enrichedData = await Promise.all(
         data.map(async record => {
-          const allSpanish = record.spanish.split(' / ')
-          const allEnglish = record.english.split(' / ')
-          const [spanish, english] = await Promise.all(
-            getAllExistingReferences(allSpanish, 'es'),
-            getAllExistingReferences(allEnglish, 'en')
+          const allSpanishContent = record.spanish.split(' / ')
+          const allEnglishContent = record.english.split(' / ')
+          const [allSpanishReferences, allEnglishReferences] = await Promise.all(
+            getAllExistingReferences(allSpanishContent, 'es').flatten(),
+            getAllExistingReferences(allEnglishContent, 'en').flatten()
           )
-          return { record, existing: { spanish, english } }
+          return { record, existingReferences: { spanish: allSpanishReferences, english: allEnglishReferences } }
         })
       )
   
