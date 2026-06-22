@@ -48,52 +48,84 @@ export async function getWordReferences(word, language) {
 export async function translate(req, res) {
   const { contents, langFrom } = req.body
 
-  if (!contents || !langFrom) {
-    return res.status(400).json({ message: 'The required information was not provided' })
+  try {
+    const response = await translateContents(contents, langFrom)
+
+    if (!response.success) {
+      const message = response.message
+      return res.status(response.status).json({ message })
+    }
+  
+    const translation = response.translation
+    res.json({ translation })
   }
+  catch (err) {
+    console.error(err)
 
-  const translation = await translateContents(contents, langFrom)
-
-  if (!translation) {
-    return res.status(500).json({ message: 'Translation error' })
+    res.status(500).json({
+      message: 'Unexpected error encountered; Translation failed'
+    })
   }
-
-  res.json({ contents, translation })
 }
 
 //admin/stage
 export async function stageWords(req, res) {
-  const { wordPairs } = req.body
 
-  if (!Array.isArray(wordPairs) || wordPairs.length === 0) {
-    return res.status(400).json({
-      message: 'No words provided'
-    })
+  async function enrichData(data) {
+    try {
+      const enrichedData = await Promise.all(
+        data.map(async record => {
+          const allSpanish = record.spanish.split(' / ')
+          const allEnglish = record.english.split(' / ')
+          const [spanish, english] = await Promise.all(
+            getAllWordReferences(allSpanish, 'es'),
+            getAllWordReferences(allEnglish, 'en')
+          )
+          return { record, existing: { spanish, english } }
+        })
+      )
+  
+      return {
+        success: true,
+        rows: enrichedData
+      }
+    }
+    catch (err) {
+      console.error(err)
+  
+      return {
+        success: false,
+        status: 500,
+        message: 'Internal server error'
+      }
+    }
   }
 
+  const { wordPairs } = req.body
+  
   try {
-    const categorizedData = await categorizeWordPairs(wordPairs)
+    let data = wordPairs
+    for (const processingFunction of [categorizeWordPairs, enrichData]) {
+      //Call categorizeWordPairs() and then enrichData() on its successful result
+      const response = await processingFunction(data)
 
-    //Enrich data with checks to see if any of the words already exist in the db
-    const enrichedData = await Promise.all(
-      categorizedData.map(async record => {
-        const allSpanish = record.spanish.split(' / ')
-        const allEnglish = record.english.split(' / ')
-        const [es, en] = await Promise.all(
-          await getAllWordReferences(allSpanish, 'es'),
-          await getAllWordReferences(allEnglish, 'en')
-        )
-        return { record, references: { es, en } }
-      })
-    )
+      if (!response.success) {
+        const message = response.message
+        return res.status(response.status).json({ message })
+      }
 
-    res.json(enrichedData)
+      //Read contents of response
+      data = response.rows 
+    }
+
+    //Return enriched data
+    res.json({ rows: data })
   }
   catch (err) {
     console.error(err)
 
     return res.status(500).json({
-      message: 'Internal server error'
+      message: 'Unexpected error encountered; Word staging failed'
     })
   }
 }

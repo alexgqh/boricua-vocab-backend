@@ -7,7 +7,21 @@ export async function getAllWordReferences(words, language) {
   )
 
   //Filter array and only return the array of similar words stored in results
+  /*
+    results: an array of an array of wordbank records (one inner array for each word provided as a param to this function)
+    example:
+      >input: ["Guagua", "Prieto", "asdf"]
+      >output: [
+        [{ spanish: "Guagua", english: "Bus", part_of_speech: 1, ...}],
+        [
+          { spanish: "Prieto", english: "Tight / Compressed / Dark-colored", ... },
+          { spanish: "Chavo prieto", english: "Penny", ... },
+          { spanish: "Café prieto", english: "Black coffee", ... }
+        ],
+        []
+      ]
+  */
   return results
-    .filter(result => result.exists)
+    .filter(result => result.success && result.exists)
     .map(result => result.references)
 }
