@@ -23,14 +23,14 @@ export async function getExistingReferences(word, language) {
   try {
     const field = (language === 'es') ? 'spanish' : 'english'
     const [references] = await pool.query(
-      'SELECT ? FROM wordbank WHERE ? LIKE ?',
-      [field, field, `%${word}%`]
+      'SELECT english, spanish FROM wordbank WHERE ? LIKE ?',
+      [field, `%${word}%`]
     )
 
     return {
       success: true,
       exists: references.length > 0,
-      references
+      references //array of { english, spanish }
     }
   }
   catch (err) {

@@ -14,14 +14,16 @@ import { getExistingReferences } from '../services/wordsService.js'
       []
     ]
 */
-export async function getAllExistingReferences(words, language) {
+export async function getAllExistingReferences(words, language, id) {
   //Get an array of results
   const results = await Promise.all(
     words.map(word => getExistingReferences(word, language))
   )
 
-  //Filter array and only return the array of similar words stored in results
-  return results
+  //Filter array and return relevant fields
+  const references = results //array of array of { spanish, english } - one outer array for each word provided
     .filter(result => result.success && result.exists)
-    .map(result => result.references)
+    .map(result => result.references) //array of { spanish, english }
+
+  return { id, references }
 }
