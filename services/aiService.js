@@ -3,7 +3,8 @@ import fs from 'node:fs'
 
 const ai = new GoogleGenAI({}) //automatically reads api key from .env
 
-async function runPrompt(prompt, expectedType) {
+async function runPrompt(prompt) {
+  // fs.writeFileSync('prompts/prompt_used.txt', prompt)
   try {
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
@@ -12,15 +13,11 @@ async function runPrompt(prompt, expectedType) {
 
     //Validate result type
     {
-      const correctType = (typeof response.text === expectedType)
+      const correctType = (typeof response.text === 'string')
       if (!correctType) {
         return {
           success: false,
-          message:
-            `Invalid AI output (
-            \tExpected: ${expectedType}
-            \tReceived: ${typeof response.text}
-          )`
+          message: `Invalid AI output (expected: 'string'; received: '${typeof response.text}')`
         }
       }
     }
@@ -40,20 +37,6 @@ async function runPrompt(prompt, expectedType) {
     }
   }
 }
-function handlePromptResults(result, responseFieldName) {
-  if (!result.success) {
-    return {
-      success: false,
-      status: 500,
-      message: result.message
-    }
-  }
-
-  return {
-    success: true,
-    [responseFieldName]: result.response
-  }
-}
 
 export async function translateContents(contents, langFrom) {
   if (!contents?.trim() || !langFrom?.trim()) {
@@ -70,8 +53,20 @@ export async function translateContents(contents, langFrom) {
     .replace(/<LANG_TO>/g, to)
     .replace(/<CONTENTS>/g, contents)
 
-  const result = await runPrompt(prompt, 'string')
-  return handlePromptResults(result, 'translation')
+  const result = await runPrompt(prompt)
+  
+  if (!result.success) {
+    return {
+      success: false,
+      status: 500,
+      message: result.message
+    }
+  }
+
+  return {
+    success: true,
+    translation: result.response
+  }
 }
 
 export async function categorizeWordPairs(wordPairs) {
@@ -84,7 +79,30 @@ export async function categorizeWordPairs(wordPairs) {
     }
   }
 
-  const prompt = fs.readFileSync('prompts/translateWord.txt', 'utf8').replace(/<INPUT>/g, data)
-  const result = await runPrompt(prompt, 'object')
-  return handlePromptResults(result, 'rows')
+  const simplifiedData = data.map(wordPair => { 
+    return {
+      es: wordPair.es,
+      en: wordPair.en
+    }
+  })
+  const prompt = fs.readFileSync('prompts/stageWords.txt', 'utf8')
+    .replace(/<INPUT>/g, JSON.stringify(simplifiedData))
+  const result = await runPrompt(prompt)
+  // const result = {
+  //   success: true,
+  //   response: `[{"spanish":"Medio","english":"Half"},{"spanish":"Guagua","english":"Bus / Pickup / Truck / Van"}]`
+  // }
+  
+  if (!result.success) {
+    return {
+      success: false,
+      status: 500,
+      message: result.message
+    }
+  }
+
+  return {
+    success: true,
+    rows: JSON.parse(result.response)
+  }
 }

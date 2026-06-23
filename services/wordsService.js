@@ -23,14 +23,14 @@ export async function getExistingReferences(word, language) {
   try {
     const field = (language === 'es') ? 'spanish' : 'english'
     const [references] = await pool.query(
-      'SELECT english, spanish FROM wordbank WHERE ? LIKE ?',
-      [field, `%${word}%`]
+      `SELECT id, spanish, english FROM wordbank WHERE CONCAT(' ', ${field}, ' ') LIKE ?`,
+      [`% ${word} %`]
     )
 
     return {
       success: true,
       exists: references.length > 0,
-      references //array of { english, spanish }
+      references //array of { id, spanish, english }
     }
   }
   catch (err) {
@@ -72,19 +72,36 @@ export async function translate(req, res) {
 export async function stageWords(req, res) {
 
   async function attachAllExistingReferences(data) {
+    if (!Array.isArray(data) || data.length === 0) {
+      return {
+        success: false,
+        status: 500,
+        message: 'No data provided upon which to attach existing references'
+      }
+    }
     try {
-      const enrichedData = await Promise.all(
-        data.map(async record => {
-          const allSpanishContent = record.spanish.split(' / ')
-          const allEnglishContent = record.english.split(' / ')
-          const [allSpanishReferences, allEnglishReferences] = await Promise.all(
-            getAllExistingReferences(allSpanishContent, 'es').flatten(),
-            getAllExistingReferences(allEnglishContent, 'en').flatten()
-          )
-          return { record, existingReferences: { spanish: allSpanishReferences, english: allEnglishReferences } }
-        })
-      )
-  
+      const enrichedData = await Promise.all(data.map(async record => {
+        const allSpanishContent = record.spanish.split(' / ')
+        const allEnglishContent = record.english.split(' / ')
+        const [allSpanishReferences, allEnglishReferences] = await Promise.all([
+          getAllExistingReferences(allSpanishContent, 'es'), //array of array of { spanish, english }
+          getAllExistingReferences(allEnglishContent, 'en')  //array of array of { spanish, english }
+        ])
+
+        //If the spanish and english word are both referenced by the same record, separate them into a "shared" key
+        const allSpanishReferenceIDs = new Set(allSpanishReferences.flat().map(ref => ref.id))
+        const allEnglishReferenceIDs = new Set(allEnglishReferences.flat().map(ref => ref.id))
+        const allSharedReferenceIDs = new Set(
+          [...allSpanishReferenceIDs].filter(id => allEnglishReferenceIDs.has(id))
+        )
+        const existingReferences = {
+          spanish: allSpanishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
+          english: allEnglishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
+          shared: allSpanishReferences.filter(record => allSharedReferenceIDs.has(record.id)),
+        }
+        return { record, existingReferences }
+      }))
+
       return {
         success: true,
         rows: enrichedData
@@ -100,7 +117,7 @@ export async function stageWords(req, res) {
       }
     }
   }
-
+  
   const { wordPairs } = req.body
   
   try {
@@ -115,7 +132,7 @@ export async function stageWords(req, res) {
       }
 
       //Read contents of response
-      data = response.rows 
+      data = response.rows
     }
 
     //Return enriched data

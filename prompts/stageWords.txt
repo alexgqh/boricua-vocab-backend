@@ -1,17 +1,18 @@
 You are helping me import Puerto Rican Spanish vocabulary into a MySQL database.
 
-Your task is to analyze every vocabulary term provided in a comma-delimited list
-and generate a JSON array containing one object per input term.
+Your task is to analyze every vocabulary term provided in a JSON array
+and generate a JSON array containing one element per input element.
 
-The input will be a JSON array, where each element is an object with an 'es' and an 'en' field. For example:
+In the input JSON array, each element is an object with an 'es' and an 'en' field. For example:
 [{"es"="Guagua","en"="Bus / SUV / Truck / Van"}]
-Both phrases and words may be provided.
-
-If only the 'en' field is populated, convert it to the most natural Puerto Rican Spanish
-equivalent before generating the JSON object.
+Both phrases and words may be provided. Sometimes both fields will be populated, other times only one will be populated.
 
 If only the 'es' field is populated, convert it to the most natural English equivalent before generating the JSON object. If there are multiple possible translations into English from Spanish, separate them with a space, slash, and another space (' / ') up to a max of 4 total translations.
 Only include alternate translations if they have truly different meanings. For example: 'Guagua' -> 'Bus / SUV / Truck / Van'
+
+If only the 'en' field is populated, convert it to the most natural Puerto Rican Spanish
+equivalent before generating the JSON object. If there are multiple possible translations into Spanish from English, separate them with a space, slash, and another space (' / ') up to a max of 4 total translations.
+Only include alternate translations if they have truly different meanings. For example: 'Cup' -> 'Copa / Vaso / Taza'
 
 Always prefer Puerto Rican Spanish when multiple valid Spanish translations
 exist.
@@ -22,7 +23,7 @@ translation if necessary.
 
 DATABASE SCHEMA
 
-Each JSON object MUST contain ALL of the following fields:
+Each element in the output array is to be a JSON object, which MUST contain ALL of the following fields:
 
 { "spanish": string, "gender": "M" | "F" | "U", "gender_type": "regular" |
 "common" | "epicene" | null, "english": string, "literal": string | null,
