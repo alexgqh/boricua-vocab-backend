@@ -1,223 +1,343 @@
-You are helping me import Puerto Rican Spanish vocabulary into a MySQL database.
+You are helping categorize vocabulary into 13 database fields.
 
-Your task is to analyze every vocabulary term provided in a JSON array
-and generate a JSON array containing one element per input element.
+OBJECTIVE
 
-In the input JSON array, each element is an object with an 'es' and an 'en' field. For example:
-[{"es"="Guagua","en"="Bus / SUV / Truck / Van"}]
-Both phrases and words may be provided. Sometimes both fields will be populated, other times only one will be populated.
+Process the INPUT JSON ARRAY and return a JSON ARRAY.
 
-If only the 'es' field is populated, convert it to the most natural English equivalent before generating the JSON object. If there are multiple possible translations into English from Spanish, separate them with a space, slash, and another space (' / ') up to a max of 4 total translations.
-Only include alternate translations if they have truly different meanings. For example: 'Guagua' -> 'Bus / SUV / Truck / Van'
+Each input element contains:
 
-If only the 'en' field is populated, convert it to the most natural Puerto Rican Spanish
-equivalent before generating the JSON object. If there are multiple possible translations into Spanish from English, separate them with a space, slash, and another space (' / ') up to a max of 4 total translations.
-Only include alternate translations if they have truly different meanings. For example: 'Cup' -> 'Copa / Vaso / Taza'
+{
+	"es": string | null,
+	"en": string | null
+}
 
-Always prefer Puerto Rican Spanish when multiple valid Spanish translations
-exist.
+One or both fields may be populated.
 
-Use the Spanish word exactly as it appears unless there is an obvious spelling
-or accent error. If you correct a spelling mistake, also correct the English
-translation if necessary.
+Generate one or more output objects for EACH input element.
+
+If either language field is missing:
+- Translate into the natural equivalent.
+- Prefer authentic Puerto Rican Spanish where applicable.
+- Do NOT force Boricua regionalization if standard Spanish is more natural.
+
+If a word or phrase has multiple DISTINCT meanings:
+- Generate additional adjacent output objects.
+- Each object represents ONE meaning only.
+- Split objects when:
+	- meaning changes
+	- part_of_speech changes
+	- theme changes
+- Do NOT split for:
+	- minor wording differences
+	- connotation only
+	- dialect differences outside Puerto Rico
+
+Example:
+Input:
+[
+	{
+		"es":"medio",
+		"en":"half"
+	}
+]
+
+Output:
+Multiple objects may be generated if "medio" has multiple distinct meanings.
+
 
 DATABASE SCHEMA
 
-Each element in the output array is to be a JSON object, which MUST contain ALL of the following fields:
+Every output object MUST contain ALL fields:
 
-{ "spanish": string, "gender": "M" | "F" | "U", "gender_type": "regular" |
-"common" | "epicene" | null, "english": string, "literal": string | null,
-"part_of_speech": integer, "theme": integer, "difficulty": integer, "note":
-string | null, "example": string | null, "example_translation": string | null,
-"vulgar": 1 | null, "loan_word": 1 | null }
+{
+	"spanish": string,
+	"gender": "M" | "F" | "U" | null,
+	"gender_type": "regular" | "common" | "epicene" | null,
+	"english": string,
+	"literal": string | null,
+	"part_of_speech": integer,
+	"theme": integer,
+	"difficulty": integer,
+	"note": string | null,
+	"example": string | null,
+	"example_translation": string | null,
+	"vulgar": 1 | null,
+	"loan_word": 1 | null
+}
 
-COLUMN DEFINITIONS
+No additional fields allowed.
 
-spanish: VARCHAR(128)
 
-english: VARCHAR(128)
+FIELD LIMITS
 
-literal: VARCHAR(128)
+spanish <= 128 chars
+english <= 128 chars
+literal <= 128 chars
+note <= 512 chars
+example <= 512 chars
+example_translation <= 512 chars
 
-gender: CHAR(1)
 
-Allowed values: "M" = masculine "F" = feminine "U" = ungendered
+FIELD RULES
 
-Use: "M" or "F" for nouns with grammatical gender. "U" for nouns with regular or
-common gender (outlined below).
 
-gender_type: ENUM('regular','common','epicene')
+spanish
 
-Use: "regular" = normal noun gender
+- Boricua Spanish only.
+- Store only the word or phrase.
+- Normal sentence casing.
+- Preserve accents.
+- No punctuation unless naturally part of the phrase.
 
-Examples: Libro Casa Ciego/a Inquilino/a
+Formatting rules for nouns:
 
-"common" = common-gender nouns where only the article changes
+If masculine/feminine endings alternate:
+"Maestro/a"
 
-Examples: el/la Estudiante el/la Guardia el/la Cantante el/la Genio
+If feminine adds "(a)":
+"Doctor(a)"
 
-"epicene" = epicene nouns whose grammatical gender never changes
 
-Examples: la Persona la Víctima el Gorila
+gender
 
-null = any entry that is not a noun
+Populate ONLY if part_of_speech = 1.
 
-PART OF SPEECH IDs
+Values:
+"M"
+"F"
+"U"
 
-Choose the SINGLE BEST part_of_speech ID.
+Use U for nouns that may function as masculine OR feminine.
 
-1 = Noun 2 = Verb 3 = Adjective 4 = Adverb 5 = Phrase 6 = Idiom 7 = Interjection
+Otherwise:
+null
 
-THEME IDs
 
-Choose the SINGLE BEST theme ID.
+gender_type
 
-If multiple themes could apply, choose the MOST SPECIFIC theme.
+Populate ONLY if gender exists.
 
-1 = Everyday Life 2 = Home & Furniture 3 = Food & Cooking 4 = Family &
-Relationships 5 = People & Personality 6 = Emotions & Feelings 7 = Body & Health
-8 = Clothing & Appearance 9 = Work & School 10 = Technology & Internet 11 =
-Transportation & Vehicles 12 = Travel & Tourism 13 = Shopping & Money 14 =
-Nature & Weather 15 = Animals 16 = Sports & Recreation 17 = Government & Legal
-18 = Religion & Spirituality 19 = Culture & Entertainment 20 = Puerto Rican
-Slang 21 = Puerto Rican Food 22 = Puerto Rican Culture 23 = Puerto Rican Places
-24 = Puerto Rican Everyday Speech
+Values:
 
-Examples:
+regular
+→ fixed grammatical gender
 
-Mofongo → 21 Alcapurria → 21
+common
+→ article determines gender OR noun may represent either sex
 
-Jíbaro → 22 Parranda → 22
+epicene
+→ grammatical gender remains fixed regardless of subject sex
 
-Vieques → 23 El Yunque → 23
+Otherwise:
+null
 
-Guagua → 24 China (Orange) → 24
 
-Vacilón → 20 Brutal → 20
+english
 
-DIFFICULTY IDs
+- Natural English equivalent.
+- Sentence casing.
+- Boricua meaning only.
 
-Estimate difficulty from the perspective of an English-speaking adult learning
-Puerto Rican Spanish.
-
-1 = Beginner 2 = Intermediate 3 = Advanced 4 = Native-Level / Rare
-
-Guidelines:
-
-Beginner: Very common everyday vocabulary. Typically learned early.
-
-Intermediate: Common conversational vocabulary. Frequently encountered in Puerto
-Rico.
-
-Advanced: Less common vocabulary. Specialized, abstract, or less frequently
-encountered.
-
-Native-Level / Rare: Highly regional expressions. Rare slang. Uncommon
-vocabulary. Literary or advanced expressions.
-
-LITERAL TRANSLATION RULES
-
-Only populate "literal" when the literal translation differs meaningfully from
-the primary English translation.
-
-Examples:
-
-despeinado english = Disheveled literal = Uncombed
-
-rompecabezas english = Puzzle literal = Head-breaker
-
-Otherwise set "literal" to null.
-
-NOTE RULES
-
-Only populate "note" when the information would genuinely help a learner.
-
-Examples:
-
-  - Puerto Rican usage notes
-  - Cultural context
-  - Regional differences
-  - Important grammatical details
-
-Additionally, populate "note" when multiple translations exist for the same English word.
-For example, "Cup" in English can be "Copa," "Taza," or "Vaso" in Spanish, depending on the type of cup. Provide a note that tells an English speaker about these differences, and the alternatives that exist in Spanish which all have the same English translation. (Example note for "Taza": "Used for a type of coffee cup
-
-Otherwise set note to null.
-
-EXAMPLE SENTENCE RULES
-
-Every entry should have an example sentence whenever reasonably possible.
-
-Example sentences should:
-
-  - Sound natural
-  - Use Puerto Rican Spanish when appropriate
-  - Clearly demonstrate the meaning
-  - Be concise
-  - Preferably 5–15 words
-
-Provide an English translation of every example sentence.
-
-CAPITALIZATION RULES
-
-spanish, english, example, example_translation: Normal sentence capitalization.
-
-VULGAR RULES
-
-Set vulgar = 1 only if the term is vulgar, profane, obscene, or commonly
-considered offensive.
-
-Otherwise: vulgar = null
-
-LOAN WORD RULES
-
-Set loan_word = 1 only if the Spanish term is a loanword borrowed from English
-
-Examples:
-
-handle parking sandwich
-
-Otherwise set loan_word to null.
-
-OUTPUT REQUIREMENTS
-
--Generate JSON ONLY. -Do not provide explanations. -Do not provide commentary.
--Do not provide markdown. -Do not provide code fences. -Output ONLY a single
-valid JSON array. -The output must be directly parseable by a JSON parser
-without modification.
-
-Requirements:
-
-  - Use double quotes only
-  - No trailing commas
-  - No comments
-  - No markdown
-  - No code fences
-
-Do not include carriage returns or line breaks inside any field value.
-
-If multiple translations are necessary, separate them using:
+If multiple translations are ESSENTIAL:
+Join using:
 
 " / "
 
+Maximum:
+4 translations
+
+Example:
+Bus / SUV / Truck / Van
+
+
+literal
+
+Populate ONLY when significantly different from natural translation.
+
 Example:
 
-{ "spanish": "Revolú", "english": "Mess / Disorder / Chaos", ... }
+Despeinado
+english:
+Disheveled
 
-Use multiple entries only when genuinely necessary.
+literal:
+Uncombed
 
-QUALITY CHECKS
+Otherwise:
+null
 
-Before generating the final output:
 
-1.  Ensure that exactly one JSON object has been generated for every input term.
-2.  Ensure every JSON object contains every required field.
-3.  Ensure all enum values are valid.
-4.  Ensure all foreign key IDs are valid.
-5.  Ensure the output is valid JSON. Use escape characters where necessary.
-6.  If uncertain about a classification, choose the most likely option rather
-    than skipping the term.
+part_of_speech
 
-Only generate the final response after all checks pass.
+1 noun
+2 verb
+3 adjective
+4 adverb
+5 phrase
+6 idiom
+7 interjection
+8 preposition
+9 conjunction
 
-INPUT (JSON format): <INPUT>
+Choose exactly ONE.
+
+If meanings differ:
+generate additional objects.
+
+
+theme
+
+Choose exactly ONE:
+
+1 everyday
+2 home
+3 food
+4 family
+5 people
+6 emotions
+7 health
+8 clothing
+9 work
+10 tech
+11 vehicles
+12 travel
+13 shopping
+14 nature
+15 animals
+16 sports
+17 government
+18 religion
+19 culture
+20 pr_slang
+21 pr_food
+22 pr_culture
+23 pr_places
+24 pr_everyday
+
+Prefer MOST SPECIFIC.
+
+Examples:
+
+Mofongo → 21
+Jíbaro → 22
+Vieques → 23
+Guagua → 24
+Vacilón → 20
+
+
+difficulty
+
+Perspective:
+English-speaking adult learning Puerto Rican Spanish.
+
+1 Beginner
+2 Intermediate
+3 Advanced
+4 Native-Level / Rare
+
+
+note
+
+Populate ONLY if useful.
+
+Examples:
+- regional usage
+- grammar clarification
+- cultural explanation
+- translation distinctions
+
+Example:
+"Taza":
+Used for mugs.
+Other words for cup include copa and vaso.
+
+Otherwise:
+null
+
+
+example
+
+Generate ONLY when confidence is high.
+
+Requirements:
+- natural
+- concise
+- demonstrates meaning
+- preferably 5–15 words
+
+Otherwise:
+null
+
+
+example_translation
+
+Translate example.
+
+If example=null:
+example_translation=null
+
+
+vulgar
+
+1 if vulgar/offensive.
+
+Otherwise:
+null
+
+
+loan_word
+
+1 only if borrowed from English.
+
+Examples:
+Handle
+Parking
+Sandwich
+
+Otherwise:
+null
+
+
+GLOBAL RULES
+
+- Preserve input order.
+- Insert generated variants immediately after origin.
+- Trim whitespace.
+- Collapse duplicate spaces.
+- Preserve accents.
+- Never invent meanings.
+- Never assume Puerto Rican usage unless known.
+- Prefer null over speculation.
+- If uncertain:
+choose the most probable classification.
+
+
+OUTPUT CONTRACT
+
+- Output EXACTLY one JSON array.
+- JSON only.
+- No markdown.
+- No comments.
+- No code fences.
+- Use double quotes.
+- Escape characters properly.
+- No trailing commas.
+- Must parse without modification.
+
+
+QUALITY CHECK
+
+Before finalizing:
+
+1. Every input element produced at least one output object.
+2. Every output object contains all schema fields.
+3. All enum values are valid.
+4. All IDs are valid.
+5. JSON is valid.
+6. Output order preserved.
+7. Additional meanings inserted directly after origin.
+
+
+INPUT JSON ARRAY:
+
+<INPUT>

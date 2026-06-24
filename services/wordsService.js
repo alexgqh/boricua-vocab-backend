@@ -117,9 +117,9 @@ export async function stageWords(req, res) {
       }
     }
   }
-  
+
   const { wordPairs } = req.body
-  
+
   try {
     let data = wordPairs
     for (const processingFunction of [categorizeWordPairs, attachAllExistingReferences]) {
@@ -156,7 +156,7 @@ export async function commitWords(req, res) {
       '(' + fields.map(field => '?').join(',') + ')'
     )
     .join(',')
-  
+
   const sql = `INSERT INTO wordbank (${fields.join(',')}) VALUES ${placeholders};`
 
   try {

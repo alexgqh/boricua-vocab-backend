@@ -54,7 +54,7 @@ export async function translateContents(contents, langFrom) {
     .replace(/<CONTENTS>/g, contents)
 
   const result = await runPrompt(prompt)
-  
+
   if (!result.success) {
     return {
       success: false,
@@ -79,7 +79,7 @@ export async function categorizeWordPairs(wordPairs) {
     }
   }
 
-  const simplifiedData = data.map(wordPair => { 
+  const simplifiedData = data.map(wordPair => {
     return {
       es: wordPair.es,
       en: wordPair.en
@@ -90,9 +90,9 @@ export async function categorizeWordPairs(wordPairs) {
   const result = await runPrompt(prompt)
   // const result = {
   //   success: true,
-  //   response: `[{"spanish":"Medio","english":"Half"},{"spanish":"Guagua","english":"Bus / Pickup / Truck / Van"}]`
+  //   response: `[{"spanish":"Medio","gender":null,"gender_type":null,"english":"Half","literal":null,"part_of_speech":3,"theme":1,"difficulty":1,"note":null,"example":null,"example_translation":null,"vulgar":null,"loan_word":null}]`
   // }
-  
+
   if (!result.success) {
     return {
       success: false,
@@ -101,8 +101,23 @@ export async function categorizeWordPairs(wordPairs) {
     }
   }
 
-  return {
-    success: true,
-    rows: JSON.parse(result.response)
+  try {
+    const rows = JSON.parse(result.response)
+    return {
+      success: true,
+      rows
+    }
+  }
+  catch (err) {
+    console.error(err)
+
+    //Create text file log with the failed output
+    fs.writeFile('errors/aiService_categorizeWordPairs.txt', result.response, 'utf-8')
+
+    return {
+      success: false,
+      status: 500,
+      message: 'Invalid AI output; Not valid JSON'
+    }
   }
 }
