@@ -109,7 +109,7 @@ export async function stageWords(req, res) {
     }
     catch (err) {
       console.error(err)
-  
+
       return {
         success: false,
         status: 500,
