@@ -25,7 +25,7 @@ export async function getAllExistingReferences(words, language) {
     .filter(result => result.success && result.exists)
     .map(result => result.references)
     .flat()
-  
+
   //Make sure there are no duplicates (can happen with "Pickup / Truck" for example -- both words return the "Pickup truck" record)
   const seen = new Set()
   const uniqueReferences = references.filter(reference => {
@@ -34,7 +34,7 @@ export async function getAllExistingReferences(words, language) {
     }
     seen.add(reference.id)
     return true
-  }) 
+  })
 
   return uniqueReferences
 }
