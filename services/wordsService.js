@@ -161,11 +161,31 @@ export async function commitWords(req, res) {
 
   try {
     pool.query(sql, data.flatMap(row => Object.values(row)))
-
-  } catch (err) {
+  }
+  catch (err) {
     console.error(err)
-    return res.status(500).json({ error: "Database error" })
+    return res.status(500).json({ message: "Database error" })
   }
 
   return res.json({ message: `${data.length} words added successfully` })
+}
+
+export async function getDropdownOptions(req, res) {
+  try {
+    const [partOfSpeechResults, themeResults, difficultyResults] = await Promise.all([
+      pool.query('SELECT id, text FROM part_of_speech ORDER BY id'),
+      pool.query('SELECT id, text FROM theme ORDER BY id'),
+      pool.query('SELECT id, text FROM difficulty ORDER BY id')
+    ])
+
+    const partOfSpeech = partOfSpeechResults?.[0] ?? null
+    const theme = themeResults?.[0] ?? null
+    const difficulty = difficultyResults?.[0] ?? null
+
+    res.json({ partOfSpeech, theme, difficulty })
+  }
+  catch (err) {
+    console.error(err)
+    return res.status(500).json({ message: "Database error" })
+  }
 }

@@ -87,11 +87,12 @@ export async function categorizeWordPairs(wordPairs) {
   })
   const prompt = fs.readFileSync('prompts/stageWords.txt', 'utf8')
     .replace(/<INPUT>/g, JSON.stringify(simplifiedData))
-  const result = await runPrompt(prompt)
-  // const result = {
-  //   success: true,
-  //   response: `[{"spanish":"Medio","gender":null,"gender_type":null,"english":"Half","literal":null,"part_of_speech":3,"theme":1,"difficulty":1,"note":null,"example":null,"example_translation":null,"vulgar":null,"loan_word":null}]`
-  // }
+  // const result = await runPrompt(prompt)
+  // comment out code above & use code below to save money on Gemini Credits during development :)
+  const result = {
+    success: true,
+    response: `[{"spanish":"Medio","gender":null,"gender_type":null,"english":"Half","literal":null,"part_of_speech":3,"theme":1,"difficulty":1,"note":null,"example":null,"example_translation":null,"vulgar":null,"loan_word":null}]`
+  }
 
   if (!result.success) {
     return {
