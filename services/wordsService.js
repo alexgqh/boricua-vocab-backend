@@ -146,7 +146,7 @@ export async function stageWords(req, res) {
   }
 }
 
-//admin/commit
+//words/commit
 export async function commitWords(req, res) {
   const { data } = req.body
   const fields = Object.keys(data[0])
