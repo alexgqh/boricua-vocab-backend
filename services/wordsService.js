@@ -44,7 +44,7 @@ export async function getExistingReferences(word, language) {
   }
 }
 
-//admin/translate
+//words/translate
 export async function translate(req, res) {
   const { contents, langFrom } = req.body
 
@@ -68,56 +68,55 @@ export async function translate(req, res) {
   }
 }
 
-//admin/stage
-export async function stageWords(req, res) {
-
-  async function attachAllExistingReferences(data) {
-    if (!Array.isArray(data) || data.length === 0) {
-      return {
-        success: false,
-        status: 500,
-        message: 'No data provided upon which to attach existing references'
-      }
-    }
-    try {
-      const enrichedData = await Promise.all(data.map(async record => {
-        const allSpanishContent = record.spanish.split(' / ')
-        const allEnglishContent = record.english.split(' / ')
-        const [allSpanishReferences, allEnglishReferences] = await Promise.all([
-          getAllExistingReferences(allSpanishContent, 'es'), //array of array of { spanish, english }
-          getAllExistingReferences(allEnglishContent, 'en')  //array of array of { spanish, english }
-        ])
-
-        //If the spanish and english word are both referenced by the same record, separate them into a "shared" key
-        const allSpanishReferenceIDs = new Set(allSpanishReferences.flat().map(ref => ref.id))
-        const allEnglishReferenceIDs = new Set(allEnglishReferences.flat().map(ref => ref.id))
-        const allSharedReferenceIDs = new Set(
-          [...allSpanishReferenceIDs].filter(id => allEnglishReferenceIDs.has(id))
-        )
-        const existingReferences = {
-          spanish: allSpanishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
-          english: allEnglishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
-          shared: allSpanishReferences.filter(record => allSharedReferenceIDs.has(record.id)),
-        }
-        return { record, existingReferences }
-      }))
-
-      return {
-        success: true,
-        rows: enrichedData
-      }
-    }
-    catch (err) {
-      console.error(err)
-
-      return {
-        success: false,
-        status: 500,
-        message: 'Internal server error'
-      }
+async function attachAllExistingReferences(data) {
+  if (!Array.isArray(data) || data.length === 0) {
+    return {
+      success: false,
+      status: 500,
+      message: 'No data provided upon which to attach existing references'
     }
   }
+  try {
+    const enrichedData = await Promise.all(data.map(async record => {
+      const allSpanishContent = record.spanish.split(' / ')
+      const allEnglishContent = record.english.split(' / ')
+      const [allSpanishReferences, allEnglishReferences] = await Promise.all([
+        getAllExistingReferences(allSpanishContent, 'es'), //array of array of { spanish, english }
+        getAllExistingReferences(allEnglishContent, 'en')  //array of array of { spanish, english }
+      ])
 
+      //If the spanish and english word are both referenced by the same record, separate them into a "shared" key
+      const allSpanishReferenceIDs = new Set(allSpanishReferences.flat().map(ref => ref.id))
+      const allEnglishReferenceIDs = new Set(allEnglishReferences.flat().map(ref => ref.id))
+      const allSharedReferenceIDs = new Set(
+        [...allSpanishReferenceIDs].filter(id => allEnglishReferenceIDs.has(id))
+      )
+      const existingReferences = {
+        spanish: allSpanishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
+        english: allEnglishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
+        shared: allSpanishReferences.filter(record => allSharedReferenceIDs.has(record.id)),
+      }
+      return { record, existingReferences }
+    }))
+
+    return {
+      success: true,
+      rows: enrichedData
+    }
+  }
+  catch (err) {
+    console.error(err)
+
+    return {
+      success: false,
+      status: 500,
+      message: 'Internal server error'
+    }
+  }
+}
+
+//words/stage
+export async function stageWords(req, res) {
   const { wordPairs } = req.body
 
   try {
