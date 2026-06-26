@@ -87,12 +87,12 @@ export async function categorizeWordPairs(wordPairs) {
   })
   const prompt = fs.readFileSync('prompts/stageWords.txt', 'utf8')
     .replace(/<INPUT>/g, JSON.stringify(simplifiedData))
-  // const result = await runPrompt(prompt)
+  const result = await runPrompt(prompt)
   // comment out code above & use code below to save money on Gemini Credits during development :)
-  const result = {
-    success: true,
-    response: `[{"spanish":"Medio","gender":null,"gender_type":null,"english":"Half","literal":null,"part_of_speech":3,"theme":1,"difficulty":1,"note":null,"example":null,"example_translation":null,"vulgar":null,"loan_word":null}]`
-  }
+  // const result = {
+  //   success: true,
+  //   response: `[{"spanish":"Medio","gender":null,"gender_type":null,"english":"Half","literal":null,"part_of_speech":3,"theme":1,"difficulty":1,"note":null,"example":null,"example_translation":null,"vulgar":null,"loan_word":null}]`
+  // }
 
   if (!result.success) {
     return {
@@ -103,17 +103,16 @@ export async function categorizeWordPairs(wordPairs) {
   }
 
   try {
-    const rows = JSON.parse(result.response)
+    //Remove JSON format marker (sometimes it generates the response with this...)
+    const rows = JSON.parse(result.response.replace(/```/g, '').replace(/```json/g, ''))
     return {
       success: true,
       rows
     }
   }
   catch (err) {
-    console.error(err)
-
     //Create text file log with the failed output
-    fs.writeFile('errors/aiService_categorizeWordPairs.txt', result.response, 'utf-8')
+    fs.writeFileSync('errors/categorizeWordPairs.txt', result.response, 'utf-8')
 
     return {
       success: false,

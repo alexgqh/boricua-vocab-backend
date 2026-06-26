@@ -24,25 +24,47 @@ If a word or phrase has multiple DISTINCT meanings:
 - Generate additional adjacent output objects.
 - Each object represents ONE meaning only.
 - Split objects when:
-	- meaning changes
 	- part_of_speech changes
-	- theme changes
+	- meaning changes SIGNIFICANTLY
+	- theme changes SIGNIFICANTLY
 - Do NOT split for:
 	- minor wording differences
-	- connotation only
+	- connotation differences
 	- dialect differences outside Puerto Rico
+	- SUBTLE changes in meaning
+- DOUBLE CHECK authenticity of alternate meanings AS WELL AS common usage within Puerto Rico before creating multiple objects from a single input. Be as strict as possible against creating multiple objects.
 
 Example:
 Input:
 [
 	{
-		"es":"medio",
-		"en":"half"
+		"es":"Medio",
+		"en":"Half"
 	}
 ]
 
 Output:
-Multiple objects may be generated if "medio" has multiple distinct meanings.
+[
+	{
+		"spanish":"Medio",
+		"english":"Half",
+		"part_of_speech": 3,
+		...
+	},
+	{
+		"spanish":"Medio",
+		"english":"Middle / Medium",
+		"part_of_speech": 1,
+		...
+	},
+	{
+		"spanish":"Medio",
+		"english":"Halfway / Partially / Kind of",
+		"part_of_speech": 4,
+		...
+	}
+]
+
 
 
 DATABASE SCHEMA
@@ -323,6 +345,8 @@ OUTPUT CONTRACT
 - Escape characters properly.
 - No trailing commas.
 - Must parse without modification.
+- No wrapping the output in any format identifier.
+- First character is '[' to begin the JSON array, and last character is ']' to end it.
 
 
 QUALITY CHECK
