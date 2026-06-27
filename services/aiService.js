@@ -102,12 +102,17 @@ export async function categorizeWordPairs(wordPairs) {
     }
   }
 
+  //Remove JSON format marker (sometimes it generates the response with this...)
+  const cleaned =
+    result.response
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/, '')
+      .trim()
+
   try {
-    //Remove JSON format marker (sometimes it generates the response with this...)
-    const rows = JSON.parse(result.response.replace(/```/g, '').replace(/```json/g, ''))
     return {
       success: true,
-      rows
+      rows: JSON.parse(cleaned)
     }
   }
   catch (err) {

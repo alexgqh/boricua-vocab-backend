@@ -119,6 +119,9 @@ If masculine/feminine endings alternate:
 If feminine adds "(a)":
 "Doctor(a)"
 
+Always keep nouns in singular form unless the word is pluralia tantum.
+(examples of pluralia tantum words: Vacaciones, Gafas).
+
 
 gender
 
