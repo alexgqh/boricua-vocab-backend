@@ -92,6 +92,7 @@ async function attachAllExistingReferences(data) {
         [...allSpanishReferenceIDs].filter(id => allEnglishReferenceIDs.has(id))
       )
       const existingReferences = {
+        initialized: true,
         spanish: allSpanishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
         english: allEnglishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
         shared: allSpanishReferences.filter(record => allSharedReferenceIDs.has(record.id)),

@@ -109,6 +109,7 @@ export async function categorizeWordPairs(wordPairs) {
       .replace(/\s*```$/, '')
       .trim()
 
+  //Parse the json - if it fails, return an error
   try {
     return {
       success: true,
