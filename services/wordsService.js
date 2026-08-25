@@ -1,7 +1,7 @@
 import { pool } from '../db/connection.js'
 import { translateContents } from '../services/aiService.js'
 import { categorizeWordPairs } from '../services/aiService.js'
-import { getAllExistingReferences } from '../utils/getAllExistingReferences.js'
+import { isArrayAndPopulated } from '../utils/common.js'
 
 //words
 export async function getWordBank(req, res) {
@@ -19,31 +19,6 @@ export async function getWordBank(req, res) {
   }
 }
 
-export async function getExistingReferences(word, language) {
-  try {
-    const field = (language === 'es') ? 'spanish' : 'english'
-    const [references] = await pool.query(
-      `SELECT id, spanish, english FROM wordbank WHERE CONCAT(' ', ${field}, ' ') LIKE ?`,
-      [`% ${word} %`]
-    )
-
-    return {
-      success: true,
-      exists: references.length > 0,
-      references //array of { id, spanish, english }
-    }
-  }
-  catch (err) {
-    console.error(err)
-
-    return {
-      success: false,
-      exists: false,
-      references: null
-    }
-  }
-}
-
 //words/translate
 export async function translate(req, res) {
   const { contents, langFrom } = req.body
@@ -55,7 +30,7 @@ export async function translate(req, res) {
       const message = response.message
       return res.status(response.status).json({ message })
     }
-  
+
     const translation = response.translation
     res.json({ translation })
   }
@@ -68,75 +43,115 @@ export async function translate(req, res) {
   }
 }
 
-async function attachAllExistingReferences(data) {
-  if (!Array.isArray(data) || data.length === 0) {
+//words/references
+export async function getExistingReferences(req, res) {
+  const { wordPairs } = req.body //wordPairs: Array<{ es: string, en: string }>
+
+  try {
+    const result = await initExistingReferences(wordPairs)
+    if (!result.success) {
+      return res.status(500).json({ message: result.message })
+    }
+    res.json({ existingReferences: result.existingReferences }) //existingReferences: Array<{ initialized: true, spanish, english, shared }>
+  }
+  catch (err) {
+    return res.status(500).json({ message: err })
+  }
+}
+
+//wordPairs: Array<{ id, es, en }>
+async function initExistingReferences(wordPairs) {
+  if (!isArrayAndPopulated(wordPairs)) {
     return {
       success: false,
       status: 500,
-      message: 'No data provided upon which to attach existing references'
+      message: 'No data provided to check for existing references'
     }
   }
-  try {
-    const enrichedData = await Promise.all(data.map(async record => {
-      const allSpanishContent = record.spanish.split(' / ')
-      const allEnglishContent = record.english.split(' / ')
-      const [allSpanishReferences, allEnglishReferences] = await Promise.all([
-        getAllExistingReferences(allSpanishContent, 'es'), //array of array of { spanish, english }
-        getAllExistingReferences(allEnglishContent, 'en')  //array of array of { spanish, english }
-      ])
 
-      //If the spanish and english word are both referenced by the same record, separate them into a "shared" key
-      const allSpanishReferenceIDs = new Set(allSpanishReferences.flat().map(ref => ref.id))
-      const allEnglishReferenceIDs = new Set(allEnglishReferences.flat().map(ref => ref.id))
-      const allSharedReferenceIDs = new Set(
-        [...allSpanishReferenceIDs].filter(id => allEnglishReferenceIDs.has(id))
-      )
-      const existingReferences = {
-        initialized: true,
-        spanish: allSpanishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
-        english: allEnglishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
-        shared: allSpanishReferences.filter(record => allSharedReferenceIDs.has(record.id)),
-      }
-      return { record, existingReferences }
-    }))
+  try {
+    const content = {
+      spanish: wordPairs.map(wordPair => wordPair.es.split(' / ')), //Array<Array<string>>
+      english: wordPairs.map(wordPair => wordPair.en.split(' / '))
+    }
+
+    //We want one query for each outer array. The regexp pattern will match all words in the inner array
+    const spanishQueries = content.spanish.map(wordArray => `
+      SELECT id, spanish, english
+      FROM wordbank
+      WHERE spanish REGEXP ?;
+    `)
+    const englishQueries = content.english.map(wordArray => `
+      SELECT id, spanish, english
+      FROM wordbank
+      WHERE english REGEXP ?;
+    `)
+    const patterns = {
+      spanish: content.spanish.map(wordArray => `(^| )(${wordArray.join('|')})( |$)`),
+      english: content.english.map(wordArray => `(^| )(${wordArray.join('|')})( |$)`),
+    }
+
+    const [
+      [allSpanishReferences], //Array<Array<{ id, spanish, english }>>
+      [allEnglishReferences]
+    ] = await Promise.all([
+      pool.query(spanishQueries.join('\n'), patterns.spanish),
+      pool.query(englishQueries.join('\n'), patterns.english)
+    ])
+
+    //If the spanish and english word are both referenced by the same record, separate them into a "shared" field
+    const allSpanishReferenceIDs = new Set(allSpanishReferences.flat().map(ref => ref.id))
+    const allEnglishReferenceIDs = new Set(allEnglishReferences.flat().map(ref => ref.id))
+    const allSharedReferenceIDs = new Set(
+      [...allSpanishReferenceIDs].filter(id => allEnglishReferenceIDs.has(id))
+    )
+    const existingReferences = {
+      initialized: true,
+      spanish: allSpanishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
+      english: allEnglishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
+      shared: allSpanishReferences.filter(record => allSharedReferenceIDs.has(record.id)),
+    }
 
     return {
       success: true,
-      rows: enrichedData
+      existingReferences
     }
   }
   catch (err) {
-    console.error(err)
-
     return {
       success: false,
-      status: 500,
-      message: 'Internal server error'
+      message: err
     }
   }
 }
 
 //words/stage
+
 export async function stageWords(req, res) {
-  const { wordPairs } = req.body
+  const { wordPairs } = req.body // Array<{ id: string, es: string, en: string }>
 
   try {
-    let data = wordPairs
-    for (const processingFunction of [categorizeWordPairs, attachAllExistingReferences]) {
-      //Call categorizeWordPairs() and then attachAllExistingReferences() on its successful result
-      const response = await processingFunction(data)
-
-      if (!response.success) {
-        const message = response.message
-        return res.status(response.status).json({ message })
-      }
-
-      //Read contents of response
-      data = response.rows
+    //wordRowsResult: { success: false, message: string } | { success: true, rows: Array<{ spanish: string, english: string, literal: ... }> }
+    const wordRowsResult = await categorizeWordPairs(wordPairs)
+    if (!wordRowsResult.success) {
+      return res.status(500).json({ message: wordRowsResult.message })
     }
 
+    //Add existing references to word rows
+    const enrichedWordRows = await Promise.all(wordRowsResult.rows.map(async (row) => {
+      const existingReferencesResult = await initExistingReferences([{ es: row.spanish, en: row.english }])
+      const existingReferences =
+        existingReferencesResult.success ?
+        existingReferencesResult.existingReferences :
+        { initialized: false, message: existingReferencesResult.message }
+      return {
+        record: row,
+        existingReferences
+      }
+    }))
+
     //Return enriched data
-    res.json({ rows: data })
+    res.json({ rows: enrichedWordRows })
   }
   catch (err) {
     console.error(err)

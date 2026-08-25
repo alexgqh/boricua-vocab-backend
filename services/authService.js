@@ -1,8 +1,7 @@
 import 'dotenv/config' //Load the environment variables
 import crypto from 'crypto'
 import { pool } from '../db/connection.js'
-
-const MS_IN_DAY = 86400000
+import { MS_IN_DAY } from '../utils/common.js'
 
 export async function authenticateAdmin(req, res) {
   const { username, password } = req.body
