@@ -164,9 +164,9 @@ export async function stageWords(req, res) {
 
 //words/commit
 export async function commitWords(req, res) {
-  const { data } = req.body
-  const fields = Object.keys(data[0])
-  const placeholders = data
+  const { wordRows } = req.body
+  const fields = Object.keys(wordRows[0])
+  const placeholders = wordRows
     .map(() =>
       '(' + fields.map(field => '?').join(',') + ')'
     )
@@ -175,12 +175,12 @@ export async function commitWords(req, res) {
   const sql = `INSERT INTO wordbank (${fields.join(',')}) VALUES ${placeholders};`
 
   try {
-    pool.query(sql, data.flatMap(row => Object.values(row)))
+    pool.query(sql, wordRows.flatMap(row => Object.values(row)))
   }
   catch (err) {
     console.error(err)
-    return res.status(500).json({ message: "Database error" })
+    return res.status(500).json({ message: 'Database error' })
   }
 
-  return res.json({ message: `${data.length} words added successfully` })
+  return res.json({ message: `${wordRows.length} word row(s) added successfully` })
 }
