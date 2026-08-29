@@ -1,7 +1,7 @@
 import { pool } from '../db/connection.js'
 import { translateContents } from '../services/aiService.js'
 import { categorizeWordPairs } from '../services/aiService.js'
-import { isArrayAndPopulated } from '../utils/common.js'
+import { isArrayAndPopulated, escapeRegex } from '../utils/common.js'
 
 //words
 export async function getWordBank(req, res) {
@@ -87,8 +87,15 @@ async function initExistingReferences(wordPairs) {
       WHERE english REGEXP ?;
     `)
     const patterns = {
-      spanish: content.spanish.map(wordArray => `(^| )(${wordArray.join('|')})( |$)`),
-      english: content.english.map(wordArray => `(^| )(${wordArray.join('|')})( |$)`),
+      spanish: content.spanish.map(wordArray => {
+        const escapedWords = wordArray.map(escapeRegex)
+        return `(^| )(${escapedWords.join('|')})( |$)`
+      }),
+    
+      english: content.english.map(wordArray => {
+        const escapedWords = wordArray.map(escapeRegex)
+        return `(^| )(${escapedWords.join('|')})( |$)`
+      }),
     }
 
     const [
@@ -142,8 +149,8 @@ export async function stageWords(req, res) {
       const existingReferencesResult = await initExistingReferences([{ es: row.spanish, en: row.english }])
       const existingReferences =
         existingReferencesResult.success ?
-        existingReferencesResult.existingReferences :
-        { initialized: false, message: existingReferencesResult.message }
+        { initialized: true, existingReferences: existingReferencesResult.existingReferences } :
+        { initialized: false, message: existingReferencesResult.message ?? 'Failed to initialize existing references' }
       return {
         record: row,
         existingReferences

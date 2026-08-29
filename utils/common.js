@@ -8,3 +8,4 @@ export const MS_IN_YEAR = MS_IN_DAY * 365
 
 export const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 export const isArrayAndPopulated = (obj) => Array.isArray(obj) && obj.length > 0
+export const escapeRegex = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
