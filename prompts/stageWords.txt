@@ -7,11 +7,10 @@ Process the INPUT JSON ARRAY and return a JSON ARRAY.
 Each input element contains:
 
 {
+"id": string,
 "es": string | null,
 "en": string | null
 }
-
-One or both fields may be populated.
 
 Generate one or more output objects for EACH input element.
 
@@ -25,53 +24,35 @@ If a word or phrase has multiple DISTINCT meanings:
 
 * Generate additional adjacent output objects.
 * Each object represents ONE meaning only.
-* Split objects when:
+* Split when part_of_speech, meaning, or theme changes significantly.
+* Do NOT split for minor wording, connotation, dialect differences outside Puerto Rico, or subtle meaning changes.
+* DOUBLE CHECK authenticity and common usage within Puerto Rico before creating multiple objects. Be strict against creating multiple objects.
 
-  * part_of_speech changes
-  * meaning changes SIGNIFICANTLY
-  * theme changes SIGNIFICANTLY
-* Do NOT split for:
+SOURCE IDs AND ROW IDs
 
-  * minor wording differences
-  * connotation differences
-  * dialect differences outside Puerto Rico
-  * SUBTLE changes in meaning
-* DOUBLE CHECK authenticity of alternate meanings AS WELL AS common usage within Puerto Rico before creating multiple objects from a single input. Be as strict as possible against creating multiple objects.
+* `sourceId` MUST equal the input `id` exactly.
+* `sourceId` MUST remain identical for every output row generated from that input.
+* `rowId` identifies the generated sense.
+* Number senses starting at 1 and incrementing by 1 in output order.
+* Format: `rowId = sourceId + "_" + senseNumber`
+* Example: sourceId `asdf` with 2 meanings produces `asdf_1` and `asdf_2`.
+* Never alter, generate, renumber, omit, or convert `sourceId`.
+* Additional senses must immediately follow the first sense.
 
-Example:
-Input:
-[
+OUTPUT SHAPE
+
+Each output object MUST contain exactly these top-level fields:
+
 {
-"es":"Medio",
-"en":"Half"
+"sourceId": "input id",
+"rowId": "input id + _ + sense number",
+"record": { ...13 database fields... },
+"existingReferences": null
 }
-]
 
-Output:
-[
-{
-"spanish":"Medio",
-"english":"Half",
-"part_of_speech": 3,
-...
-},
-{
-"spanish":"Medio",
-"english":"Middle / Medium",
-"part_of_speech": 1,
-...
-},
-{
-"spanish":"Medio",
-"english":"Halfway / Partially / Kind of",
-"part_of_speech": 4,
-...
-}
-]
+`existingReferences` MUST always be `null`. It will be populated later by the application.
 
-DATABASE SCHEMA
-
-Every output object MUST contain ALL fields:
+`record` MUST contain exactly these 13 fields and NO `id`, `sourceId`, or `rowId`:
 
 {
 "spanish": string,
@@ -88,8 +69,6 @@ Every output object MUST contain ALL fields:
 "vulgar": 1 | null,
 "loan_word": 1 | null
 }
-
-No additional fields allowed.
 
 FIELD LIMITS
 
@@ -110,401 +89,87 @@ spanish
 * Preserve accents.
 * No punctuation unless naturally part of the phrase.
 
-### GENDERED NOUN FORMATTING
+GENDERED NOUN FORMATTING
 
-When a noun can naturally refer to either a male or female person AND Spanish uses different masculine/feminine forms, represent BOTH forms in the `spanish` field.
+When a noun can naturally refer to either a male or female person AND Spanish uses different masculine/feminine forms, represent BOTH forms in `spanish`.
 
-The formatting depends on how the feminine form is formed.
+Masculine -o / feminine -a:
 
-#### Masculine -o / feminine -a
+* Use `masculine/a`
+* Examples: `niño/a`, `maestro/a`, `amigo/a`, `empleado/a`, `cajero/a`
+* Do NOT use `(a)` for words ending in `-o`.
 
-When the masculine form ends in `-o` and the feminine form is formed by changing the final `-o` to `-a`, use:
+Masculine consonant + feminine -a:
 
-"masculine/a"
+* Use `masculine(a)`
+* Examples: `trabajador(a)`, `profesor(a)`, `vendedor(a)`, `autor(a)`, `director(a)`
 
-Examples:
+Irregular/substantially different forms:
 
-"niño" → "niño/a"
-"maestro" → "maestro/a"
-"amigo" → "amigo/a"
-"empleado" → "empleado/a"
-"cajero" → "cajero/a"
-"jugador" → NOT "jugador/a" because it does not end in -o
+* Use actual forms separated by `/` with NO spaces.
+* Examples: `actor/actriz`, `rey/reina`, `héroe/heroína`
+* Never invent forms such as `actor(a)`, `rey(a)`, `héroe(a)`, `actor/actora`, `rey/reya`.
 
-IMPORTANT:
-Do NOT use the `(a)` format for words ending in `-o` whose feminine form ends in `-a`.
+Gender-specific nouns remain separate:
 
-Correct:
-"cajero/a"
-"maestro/a"
-"trabajador(a)"
+* `hombre`, `padre`, `esposo` → masculine
+* `mujer`, `madre`, `esposa` → feminine
 
-Incorrect:
-"cajero(a)"
-"maestro(a)"
+Do NOT combine distinct lexical entries such as `rey = King` and `reina = Queen` into one entry.
 
-#### Masculine forms where feminine adds -a
+COMMON VS. EPICENE NOUNS
 
-When the masculine form ends in a consonant and the feminine form is created by adding `-a`, use:
+`common`: form changes according to the sex of the person.
 
-"masculine(a)"
+* `niño/a`
+* `trabajador(a)`
+* `profesor(a)`
 
-Examples:
+`epicene`: one fixed grammatical gender can refer to either sex.
 
-"trabajador" → "trabajador(a)"
-"profesor" → "profesor(a)"
-"vendedor" → "vendedor(a)"
-"autor" → "autor(a)"
-"director" → "director(a)"
+* `persona` → F
+* `víctima` → F
+* `testigo` → M
+* `miembro` → M
 
-The `(a)` represents the additional feminine `a`.
-
-#### Irregular or substantially different feminine forms
-
-When the masculine and feminine forms are genuinely distinct and cannot appropriately be represented using either `-o/a` or `(a)`, use the actual masculine and feminine forms separated by `/` with NO spaces.
-
-Format:
-
-"masculine/feminine"
-
-Examples:
-
-"actor/actriz"
-"rey/reina"
-"héroe/heroína"
-
-NEVER invent forms such as:
-
-"actor(a)"
-"rey(a)"
-"héroe(a)"
-"actor/actora"
-"rey/reya"
-
-Only use an irregular feminine form when you are highly confident that it is the correct Spanish form.
-
-#### Gender-specific nouns
-
-If a noun refers specifically to males or specifically to females, do NOT create a combined form.
-
-Examples:
-
-"hombre"
-"padre"
-"esposo"
-
-remain masculine.
-
-Examples:
-
-"mujer"
-"madre"
-"esposa"
-
-remain feminine.
-
-Do NOT convert these to `common`.
-
-#### Important distinction: common vs. epicene nouns
-
-A noun is `common` when its form changes according to the sex of the person being described.
-
-Examples:
-
-"niño/niña"
-"trabajador/trabajadora"
-"profesor/profesora"
-
-A noun is `epicene` when it has ONE fixed grammatical gender but can refer to a person of either sex without changing the noun.
-
-Examples:
-
-"persona" → feminine epicene
-"víctima" → feminine epicene
-"testigo" → masculine epicene
-"miembro" → masculine epicene
-
-Do NOT classify a noun as `common` merely because both men and women can be described using it.
-
-Do NOT classify a noun as `epicene` merely because its masculine and feminine forms happen to look identical.
-
-Determine the actual grammatical behavior of the Spanish noun.
-
-#### Irregular gender pairs
-
-When masculine and feminine forms are separate lexical forms rather than a simple gender variation, DO NOT combine them into one vocabulary entry if the meanings are distinct.
-
-For example:
-
-"rey" = King
-"reina" = Queen
-
-These should remain separate entries rather than:
-
-"rey/reina" = "King/Queen"
-
-Likewise:
-
-"actor" = Actor
-"actriz" = Actress
-
-These should remain separate entries when they are provided or generated as distinct vocabulary items.
-
-The combined slash format is intended for a SINGLE vocabulary concept represented by both gender forms, not for combining unrelated lexical entries.
-
-### ADJECTIVE GENDER FORMATTING
-
-For adjectives, the same gender-representation principle applies, but ONLY the `spanish` field is affected.
-
-Do NOT modify `gender_type` or `gender` merely because an adjective has masculine/feminine forms.
-
-#### Adjectives ending in -o
-
-When an adjective has masculine `-o` and feminine `-a`, use:
-
-"masculine/a"
-
-Examples:
-
-"alto" → "alto/a"
-"bajo" → "bajo/a"
-"bonito" → "bonito/a"
-"cansado" → "cansado/a"
-"loco" → "loco/a"
-"trabajador" does NOT belong to this category because it does not end in `-o`.
-
-#### Adjectives where feminine adds -a
-
-When the masculine adjective ends in a consonant and the feminine form is created by adding `-a`, use:
-
-"masculine(a)"
-
-Examples:
-
-"trabajador" → "trabajador(a)"
-"español" → "español(a)"
-
-Only use `(a)` when the feminine form is created by adding `a`.
-
-#### Adjectives with distinct masculine/feminine forms
-
-When the masculine and feminine adjective forms are genuinely distinct and cannot be represented with `-o/a` or `(a)`, separate them with `/` and NO spaces.
-
-Format:
-
-"masculine/feminine"
-
-Use the actual feminine form.
-
-Do NOT invent feminine forms.
-
-#### Invariable adjectives
-
-If the adjective has the same form for masculine and feminine, do NOT modify it.
-
-Examples:
-
-"grande"
-"feliz"
-"amable"
-"interesante"
-"inteligente"
-
-Do NOT add `/a` or `(a)` merely because the adjective can describe both males and females.
-
-#### Do not apply suffix rules blindly
-
-Do NOT determine gender formatting solely from spelling.
-
-For every adjective, determine whether the feminine form actually changes.
-
-For example:
-
-"rojo" → "rojo/a"
-"joven" → "joven"
-"feliz" → "feliz"
-
-Do not modify an adjective if its masculine and feminine forms are identical.
-
-### OTHER PARTS OF SPEECH
-
-Do not apply noun or adjective gender formatting to:
-
-* verbs
-* adverbs
-* phrases
-* idioms
-* interjections
-* prepositions
-* conjunctions
-
-Gender should be determined only according to the rules for the relevant part of speech.
+Do NOT use `U` for epicene nouns.
 
 gender
 
-Populate ONLY if part_of_speech = 1.
-
-Values:
-
-"M"
-"F"
-"U"
-
-### For nouns:
-
-Use `M` when the noun is grammatically masculine and refers specifically to males OR has masculine grammatical gender.
-
-Use `F` when the noun is grammatically feminine and refers specifically to females OR has feminine grammatical gender.
-
-Use `U` ONLY for `common` nouns whose masculine and feminine forms are represented together in the `spanish` field.
-
-Examples:
-
-"niño/a" → `U`
-"trabajador(a)" → `U`
-
-For `epicene` nouns, NEVER use `U`.
-
-Epicene nouns must use their fixed grammatical gender:
-
-"persona" → `F`
-"víctima" → `F`
-"testigo" → `M`
-"miembro" → `M`
-
-For gender-specific nouns:
-
-"hombre" → `M`
-"mujer" → `F`
-
-### For adjectives and all other parts of speech:
-
-Set:
-
-`gender = null`
-
-Do NOT populate `gender` for adjectives, even when the adjective has masculine/feminine forms.
-
-Otherwise:
-
-null
+* Populate ONLY when `part_of_speech = 1`.
+* `M`, `F`, or `U`.
+* Common nouns represented with both forms → `U`.
+* Epicene nouns → grammatical gender (`M` or `F`).
+* Otherwise `null`.
 
 gender_type
 
-Populate ONLY if part_of_speech = 1.
+* Populate ONLY when `part_of_speech = 1`.
+* `regular`: fixed grammatical gender, not epicene.
+* `common`: masculine/feminine forms can refer to either sex.
+* `epicene`: fixed grammatical gender can refer to either sex.
+* Otherwise `null`.
 
-Values:
+ADJECTIVE GENDER FORMATTING
 
-### regular
+Only modify `spanish`.
 
-Use `regular` for a noun with a fixed grammatical gender that is NOT an epicene noun.
+* Masculine `-o` / feminine `-a` → `masculine/a`
 
-Examples:
+  * `alto/a`, `bajo/a`, `bonito/a`
+* Masculine consonant + feminine `-a` → `masculine(a)`
 
-"hombre" → regular / M
-"mujer" → regular / F
-"rey" → regular / M
-"reina" → regular / F
+  * `trabajador(a)`, `español(a)`
+* Distinct forms → `masculine/feminine` with NO spaces.
+* Invariable adjectives remain unchanged.
 
-### common
+  * `grande`, `feliz`, `amable`, `interesante`, `inteligente`
+* Never determine formatting from spelling alone.
+* `gender` and `gender_type` MUST always be `null` for adjectives.
 
-Use `common` when the noun has masculine and feminine forms and can naturally refer to either sex.
+OTHER PARTS OF SPEECH
 
-Examples:
-
-"niño/a" → common / U
-"trabajador(a)" → common / U
-"profesor(a)" → common / U
-
-The `spanish` field MUST represent both forms for common nouns.
-
-### epicene
-
-Use `epicene` when:
-
-1. the noun has ONE fixed grammatical gender,
-2. the noun can refer to either a male or female person,
-3. the noun itself does NOT change according to the person's sex.
-
-Examples:
-
-"persona" → epicene / F
-"víctima" → epicene / F
-"testigo" → epicene / M
-"miembro" → epicene / M
-
-IMPORTANT:
-
-`epicene` does NOT mean "gender-neutral."
-
-An epicene noun still has grammatical gender.
-
-Therefore:
-
-"persona" → gender = F
-"testigo" → gender = M
-
-Never use `U` for epicene nouns.
-
-### CRITICAL COMMON VS. EPICENE DECISION
-
-Ask these questions in order:
-
-1. Can this noun refer to either a male or female person?
-
-   * If NO: use `regular` with M or F.
-   * If YES: continue.
-
-2. Does the noun change form depending on the person's sex?
-
-   * If YES: use `common` and `gender = U`.
-   * If NO: continue.
-
-3. Does the noun retain one fixed grammatical gender regardless of the person's sex?
-
-   * If YES: use `epicene` and set M or F according to grammatical gender.
-
-Do NOT use `common` merely because both men and women can be described by the noun.
-
-Do NOT use `epicene` merely because the noun has the same spelling for both sexes.
-
-Otherwise:
-
-null
-
-english
-
-* Natural English equivalent.
-* Sentence casing.
-* Boricua meaning only.
-
-If multiple translations are ESSENTIAL:
-Join using:
-
-" / "
-
-Maximum:
-4 translations
-
-Example:
-
-Bus / SUV / Truck / Van
-
-literal
-
-Populate ONLY when significantly different from natural translation.
-
-Example:
-
-Despeinado
-english:
-Disheveled
-
-literal:
-Uncombed
-
-Otherwise:
-null
+Do not apply noun/adjective gender formatting to verbs, adverbs, phrases, idioms, interjections, prepositions, or conjunctions.
 
 part_of_speech
 
@@ -520,13 +185,23 @@ part_of_speech
 
 Choose exactly ONE.
 
-If meanings differ:
-generate additional objects.
+english
+
+* Natural English equivalent.
+* Sentence casing.
+* Boricua meaning only.
+* If multiple translations are ESSENTIAL, join with `/`.
+* Maximum 4 translations.
+* Example: `Bus / SUV / Truck / Van`
+
+literal
+
+* Populate ONLY when significantly different from the natural translation.
+* Otherwise `null`.
 
 theme
 
 Choose exactly ONE:
-
 1 everyday
 2 home
 3 food
@@ -556,105 +231,151 @@ Prefer MOST SPECIFIC.
 
 Examples:
 
-Mofongo → 21
-Jíbaro → 22
-Vieques → 23
-Guagua → 24
-Vacilón → 20
+* Mofongo → 21
+* Jíbaro → 22
+* Vieques → 23
+* Guagua → 24
+* Vacilón → 20
 
 difficulty
 
-Perspective:
-English-speaking adult learning Puerto Rican Spanish.
-
+For an English-speaking adult learning Puerto Rican Spanish:
 1 Beginner
 2 Intermediate
 3 Advanced
 4 Native-Level / Rare
 
 note
-
-Populate ONLY if useful.
-
-Examples:
+Populate ONLY if useful:
 
 * regional usage
 * grammar clarification
 * cultural explanation
 * translation distinctions
-
-Example:
-"Taza":
-Used for mugs.
-Other words for cup include copa and vaso.
-
-Otherwise:
-null
+  Otherwise `null`.
 
 example
-
 Generate ONLY when confidence is high.
 
-Requirements:
-
-* natural
-* concise
-* demonstrates meaning
-* preferably 5–15 words
-
-Otherwise:
-null
+* Natural
+* Concise
+* Demonstrates meaning
+* Preferably 5–15 words
+  Otherwise `null`.
 
 example_translation
-
-Translate example.
-
-If example=null:
-example_translation=null
+Translate `example`.
+If `example = null`, then `example_translation = null`.
 
 vulgar
 
-1 if vulgar/offensive.
-
-Otherwise:
-null
+* `1` if vulgar/offensive.
+* Otherwise `null`.
 
 loan_word
 
-1 only if borrowed from English.
-
-Examples:
-Handle
-Parking
-Sandwich
-
-Otherwise:
-null
+* `1` ONLY if borrowed from English.
+* Examples: `Handle`, `Parking`, `Sandwich`
+* Otherwise `null`.
 
 GLOBAL RULES
 
 * Preserve input order.
-* Insert generated variants immediately after origin.
+* Insert additional senses immediately after their source row.
 * Trim whitespace.
 * Collapse duplicate spaces.
 * Preserve accents.
 * Never invent meanings.
 * Never assume Puerto Rican usage unless known.
-* Prefer null over speculation.
-* If uncertain about a gender classification, prefer the most probable classification only when the evidence is strong.
+* Prefer `null` over speculation.
 * Do not create gender variants when Spanish does not actually use them.
 * Do not combine distinct lexical entries merely because they are masculine/feminine counterparts.
-* For nouns, carefully distinguish `regular`, `common`, and `epicene`.
-* For adjectives, gender formatting affects ONLY the `spanish` field.
+* Carefully distinguish `regular`, `common`, and `epicene`.
+* For adjectives, gender formatting affects ONLY `spanish`.
 * Never change `gender` or `gender_type` for adjectives.
-* When representing masculine/feminine variants together, NEVER put spaces around `/`.
-* Use `-o/a` for adjectives and nouns whose masculine ends in `-o` and feminine ends in `-a`.
-* Use `(a)` when the feminine form is created by adding `a` to a masculine form ending in a consonant.
-* Use `masculine/feminine` when the two forms are genuinely distinct or irregular.
+* Never put spaces around `/` when representing gender forms.
+* Use `-o/a` when masculine ends in `-o` and feminine ends in `-a`.
+* Use `(a)` when feminine is formed by adding `a` to a consonant-ending masculine form.
+* Use `masculine/feminine` for genuinely distinct or irregular forms.
 * Do not use `(a)` for words ending in `-o`.
-* Do not use `/a` for words whose feminine form is not formed by changing `-o` to `-a`.
-* If a gendered word already has the correct combined representation, do not alter it.
+* Do not alter an already-correct gender representation.
 * If a word is invariable for gender, do not create a gender variant.
+
+EXAMPLE
+
+Input:
+[
+{
+"id": "asdf",
+"es": "Malla",
+"en": null
+}
+]
+
+Possible output:
+[
+{
+"sourceId": "asdf",
+"rowId": "asdf_1",
+"record": {
+"spanish": "Malla",
+"gender": "F",
+"gender_type": "regular",
+"english": "Mesh / Net",
+"literal": null,
+"part_of_speech": 1,
+"theme": 1,
+"difficulty": 2,
+"note": null,
+"example": null,
+"example_translation": null,
+"vulgar": null,
+"loan_word": null
+},
+"existingReferences": null
+},
+{
+"sourceId": "asdf",
+"rowId": "asdf_2",
+"record": {
+"spanish": "Malla",
+"gender": "F",
+"gender_type": "regular",
+"english": "Swimsuit",
+"literal": null,
+"part_of_speech": 1,
+"theme": 8,
+"difficulty": 2,
+"note": null,
+"example": null,
+"example_translation": null,
+"vulgar": null,
+"loan_word": null
+},
+"existingReferences": null
+}
+]
+
+QUALITY CHECK
+
+Before finalizing:
+
+1. Every input element produced at least one output object.
+2. Every output object has exactly `sourceId`, `rowId`, `record`, `existingReferences`.
+3. `sourceId` exactly matches the input `id`.
+4. `rowId` uses the correct 1-based sense number.
+5. `record` contains exactly the 13 database fields.
+6. `existingReferences` is always `null`.
+7. All enum values are valid.
+8. JSON is valid.
+9. Output order is preserved.
+10. Additional meanings are inserted immediately after their source.
+11. Every noun has the correct `gender`/`gender_type` relationship.
+12. Every common noun has `gender = "U"`.
+13. Every epicene noun has `gender = "M"` or `"F"`, never `"U"`.
+14. Every adjective has `gender = null` and `gender_type = null`.
+15. Gender formatting follows all noun/adjective rules.
+16. No distinct lexical masculine/feminine entries are improperly combined.
 
 OUTPUT CONTRACT
 
@@ -667,30 +388,8 @@ OUTPUT CONTRACT
 * Escape characters properly.
 * No trailing commas.
 * Must parse without modification.
-* No wrapping the output in any format identifier.
-* First character is '[' to begin the JSON array, and last character is ']' to end it.
-
-QUALITY CHECK
-
-Before finalizing:
-
-1. Every input element produced at least one output object.
-2. Every output object contains all schema fields.
-3. All enum values are valid.
-4. All IDs are valid.
-5. JSON is valid.
-6. Output order preserved.
-7. Additional meanings inserted directly after origin.
-8. Every noun has the correct `gender` and `gender_type` relationship.
-9. Every `common` noun has `gender = "U"`.
-10. Every `epicene` noun has `gender = "M"` or `"F"`, never `"U"`.
-11. Every adjective has `gender = null`.
-12. Every adjective with masculine `-o` / feminine `-a` uses `-o/a`.
-13. Every adjective whose feminine is formed by adding `a` uses `(a)`.
-14. Distinct or irregular masculine/feminine adjective forms use `/` with NO spaces.
-15. Invariable adjectives are not modified.
-16. Distinct lexical masculine/feminine nouns such as `rey/reina` are not improperly combined into one entry.
-17. No field other than `spanish` is altered solely because an adjective has a gendered form.
+* First character must be `[`.
+* Last character must be `]`.
 
 INPUT JSON ARRAY:
 

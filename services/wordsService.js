@@ -55,7 +55,7 @@ export async function getExistingReferences(req, res) {
     res.json({ existingReferences: result.existingReferences }) //existingReferences: Array<{ initialized: true, spanish, english, shared }>
   }
   catch (err) {
-    return res.status(500).json({ message: err })
+    return res.status(500).json({ message: err.message })
   }
 }
 
@@ -70,95 +70,292 @@ async function initExistingReferences(wordPairs) {
   }
 
   try {
-    const content = {
-      spanish: wordPairs.map(wordPair => wordPair.es.split(' / ')), //Array<Array<string>>
-      english: wordPairs.map(wordPair => wordPair.en.split(' / '))
-    }
+    /*
+      Create one set of queries for each wordPair.
 
-    //We want one query for each outer array. The regexp pattern will match all words in the inner array
-    const spanishQueries = content.spanish.map(wordArray => `
-      SELECT id, spanish, english
-      FROM wordbank
-      WHERE spanish REGEXP ?;
-    `)
-    const englishQueries = content.english.map(wordArray => `
-      SELECT id, spanish, english
-      FROM wordbank
-      WHERE english REGEXP ?;
-    `)
-    const patterns = {
-      spanish: content.spanish.map(wordArray => {
-        const escapedWords = wordArray.map(escapeRegex)
-        return `(^| )(${escapedWords.join('|')})( |$)`
-      }),
-    
-      english: content.english.map(wordArray => {
-        const escapedWords = wordArray.map(escapeRegex)
-        return `(^| )(${escapedWords.join('|')})( |$)`
-      }),
-    }
+      Each wordPair can have:
+        - an es value
+        - an en value
+        - both
+        - neither
 
-    const [
-      [allSpanishReferences], //Array<Array<{ id, spanish, english }>>
-      [allEnglishReferences]
-    ] = await Promise.all([
-      pool.query(spanishQueries.join('\n'), patterns.spanish),
-      pool.query(englishQueries.join('\n'), patterns.english)
-    ])
+      Missing/empty values simply don't generate a query.
+    */
+    const referenceChecks = wordPairs.map(wordPair => {
+      const checks = {
+        id: wordPair.id,
+        spanishPattern: null,
+        englishPattern: null
+      }
 
-    //If the spanish and english word are both referenced by the same record, separate them into a "shared" field
-    const allSpanishReferenceIDs = new Set(allSpanishReferences.flat().map(ref => ref.id))
-    const allEnglishReferenceIDs = new Set(allEnglishReferences.flat().map(ref => ref.id))
-    const allSharedReferenceIDs = new Set(
-      [...allSpanishReferenceIDs].filter(id => allEnglishReferenceIDs.has(id))
+      /*
+        Build the Spanish regex if an "es" value was provided.
+
+        "Maestra" would become:
+          (^| / )(Maestra|Maestro/a)( / |$)
+        "Profesor" would become:
+          (^| / )(Profesor|Profesor(a))( / |$)
+
+        Each word is escaped first so regex characters in the
+        supplied text are treated literally.
+      */
+      if (wordPair.es) {
+        const words = wordPair.es
+          .split(' / ')
+          .map(escapeRegex)
+          .map(word => {
+            const wordLC = word.toLowerCase()
+            {
+              const lastChar = wordLC.slice(-1)
+              if (lastChar === 'o' || lastChar === 'a') {
+                return word + '|' + word.slice(0, -1) + 'o/a'
+              }
+            }
+            if (wordLC.slice(-2) === 'or') {
+              return word + '(\\(a\\))?'
+            }
+            return word
+          })
+
+        checks.spanishPattern =
+
+          `(^| / )(${words.join('|')})( / |$)`
+      }
+
+      /*
+        Build the English regex if an "en" value was provided.
+      */
+      if (wordPair.en) {
+        const words = wordPair.en
+          .split(' / ')
+          .map(escapeRegex)
+
+        checks.englishPattern =
+          `(^| / )(${words.join('|')})( / |$)`
+      }
+
+      // console.log(checks)
+      return checks
+    })
+
+
+    /*
+      Run the Spanish and English checks for each wordPair.
+
+      Each wordPair gets its own result, so the database results
+      remain associated with the correct request ID.
+
+      If a field is empty, Promise.resolve([]) gives us an empty
+      result instead of making an unnecessary database query.
+    */
+    const results = await Promise.all(
+      referenceChecks.map(async check => {
+        const [
+          spanishResult,
+          englishResult
+        ] = await Promise.all([
+          check.spanishPattern
+            ? pool.query(`
+                SELECT id, spanish, english
+                FROM wordbank
+                WHERE spanish REGEXP ?;
+              `, [check.spanishPattern])
+            : Promise.resolve([[]]),
+
+          check.englishPattern
+            ? pool.query(`
+                SELECT id, spanish, english
+                FROM wordbank
+                WHERE english REGEXP ?;
+              `, [check.englishPattern])
+            : Promise.resolve([[]])
+        ])
+
+
+        /*
+          pool.query() returns:
+            [rows, fields]
+
+          We only need the rows.
+        */
+        const spanishReferences = spanishResult[0]
+        const englishReferences = englishResult[0]
+
+
+        /*
+          Find records that are referenced by BOTH the Spanish
+          and English values for this particular wordPair.
+        */
+        const spanishReferenceIDs = new Set(
+          spanishReferences.map(ref => ref.id)
+        )
+
+        const englishReferenceIDs = new Set(
+          englishReferences.map(ref => ref.id)
+        )
+
+        const sharedReferenceIDs = new Set(
+          [...spanishReferenceIDs]
+            .filter(id => englishReferenceIDs.has(id))
+        )
+
+
+        /*
+          Separate the results into:
+            - spanish: referenced only by the Spanish value
+            - english: referenced only by the English value
+            - shared: referenced by both values
+        */
+        const existingReferences = {
+          initialized: true,
+
+          spanish: spanishReferences.filter(
+            record => !sharedReferenceIDs.has(record.id)
+          ),
+
+          english: englishReferences.filter(
+            record => !sharedReferenceIDs.has(record.id)
+          ),
+
+          shared: spanishReferences.filter(
+            record => sharedReferenceIDs.has(record.id)
+          )
+        }
+
+
+        /*
+          Return the original request ID along with its references.
+        */
+        return {
+          id: check.id,
+          existingReferences
+        }
+      })
     )
-    const existingReferences = {
-      initialized: true,
-      spanish: allSpanishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
-      english: allEnglishReferences.filter(record => !allSharedReferenceIDs.has(record.id)),
-      shared: allSpanishReferences.filter(record => allSharedReferenceIDs.has(record.id)),
-    }
+
 
     return {
       success: true,
-      existingReferences
+      existingReferences: results
     }
   }
   catch (err) {
+    console.error('Failed to initialize existing references:', err)
+
+    const message = (err.errorno === 'ETIMEDOUT') ?
+      'Database connection could not be established' :
+      err.message
+
     return {
       success: false,
-      message: err
+      message
     }
   }
 }
 
 //words/stage
-
 export async function stageWords(req, res) {
-  const { wordPairs } = req.body // Array<{ id: string, es: string, en: string }>
+  const { wordPairs } = req.body
+  // Array<{ id: string, es: string, en: string }>
 
   try {
-    //wordRowsResult: { success: false, message: string } | { success: true, rows: Array<{ spanish: string, english: string, literal: ... }> }
+    /*
+      categorizeWordPairs() returns one or more rows for each source
+      wordPair. Each generated row contains:
+        - sourceId: original input ID
+        - rowId: unique ID for this generated sense
+        - record: the 13 database fields
+        - existingReferences: null
+
+      Use rowId for reference lookup because each distinct sense needs
+      its own existing-reference result.
+    */
     const wordRowsResult = await categorizeWordPairs(wordPairs)
+
     if (!wordRowsResult.success) {
-      return res.status(500).json({ message: wordRowsResult.message })
+      return res.status(500).json({
+        message: wordRowsResult.message
+      })
     }
 
-    //Add existing references to word rows
-    const enrichedWordRows = await Promise.all(wordRowsResult.rows.map(async (row) => {
-      const existingReferencesResult = await initExistingReferences([{ es: row.spanish, en: row.english }])
-      const existingReferences =
-        existingReferencesResult.success ?
-        { initialized: true, existingReferences: existingReferencesResult.existingReferences } :
-        { initialized: false, message: existingReferencesResult.message ?? 'Failed to initialize existing references' }
-      return {
-        record: row,
-        existingReferences
-      }
+    /*
+      Check existing references for every generated sense in one batch.
+
+      getExistingReferences() / initExistingReferences() expects:
+        { id, es, en }
+
+      Use the generated rowId as the lookup ID so the result can later
+      be mapped directly back to the correct generated row.
+    */
+    const referenceWordPairs = wordRowsResult.rows.map(row => ({
+      id: row.rowId,
+      es: row.record.spanish,
+      en: row.record.english
     }))
 
-    //Return enriched data
-    res.json({ rows: enrichedWordRows })
+    const existingReferencesResult =
+      await initExistingReferences(referenceWordPairs)
+
+    /*
+      If reference initialization fails for the entire batch, preserve
+      the staged records and mark their references as uninitialized.
+    */
+    if (!existingReferencesResult.success) {
+      const enrichedWordRows = wordRowsResult.rows.map(row => ({
+        sourceId: row.sourceId,
+        rowId: row.rowId,
+        record: row.record,
+
+        existingReferences: {
+          initialized: false,
+          message:
+            existingReferencesResult.message ??
+            'Failed to initialize existing references'
+        }
+      }))
+
+      return res.json({
+        rows: enrichedWordRows
+      })
+    }
+
+    /*
+      Map reference results by rowId so each generated sense gets the
+      references belonging specifically to that sense.
+    */
+    const existingReferencesById = new Map(
+      existingReferencesResult.existingReferences.map(result => [
+        result.id,
+        result.existingReferences
+      ])
+    )
+
+    /*
+      Attach the matching references to each generated row.
+
+      sourceId identifies the original input word pair.
+      rowId identifies this specific generated sense.
+    */
+    const enrichedWordRows = wordRowsResult.rows.map(row => {
+      const references = existingReferencesById.get(row.rowId)
+
+      return {
+        sourceId: row.sourceId,
+        rowId: row.rowId,
+        record: row.record,
+
+        existingReferences:
+          references ??
+          {
+            initialized: false,
+            message: 'No existing-reference result found for this row'
+          }
+      }
+    })
+
+    return res.json({
+      rows: enrichedWordRows
+    })
   }
   catch (err) {
     console.error(err)
@@ -175,7 +372,7 @@ export async function commitWords(req, res) {
   const fields = Object.keys(wordRows[0])
   const placeholders = wordRows
     .map(() =>
-      '(' + fields.map(field => '?').join(',') + ')'
+      '(' + fields.map(() => '?').join(',') + ')'
     )
     .join(',')
 

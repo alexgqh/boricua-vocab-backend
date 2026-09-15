@@ -79,14 +79,8 @@ export async function categorizeWordPairs(wordPairs) {
     }
   }
 
-  const simplifiedData = data.map(wordPair => {
-    return {
-      es: wordPair.es,
-      en: wordPair.en
-    }
-  })
   const prompt = fs.readFileSync('prompts/stageWords.txt', 'utf8')
-    .replace(/<INPUT>/g, JSON.stringify(simplifiedData))
+    .replace(/<INPUT>/g, JSON.stringify(data))
   const result = await runPrompt(prompt)
   // comment out code above & use code below to save money on Gemini Credits during development :)
   // const result = {
