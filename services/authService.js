@@ -3,6 +3,12 @@ import crypto from 'crypto'
 import { pool } from '../db/connection.js'
 import { MS_IN_DAY } from '../utils/common.js'
 
+function getAuthCookieName() {
+  return process.env.ENVIRONMENT === 'prod'
+    ? '__Host-auth'
+    : 'auth'
+}
+
 export async function authenticateAdmin(req, res) {
   const { username, password } = req.body
 
@@ -27,12 +33,18 @@ export async function authenticateAdmin(req, res) {
 
   res
     .status(200)
-    .cookie('auth', sessionID, { httpOnly: true, sameSite: 'strict', maxAge: MS_IN_DAY })
+    .cookie(getAuthCookieName(), sessionID, {
+      httpOnly: true,
+      secure: process.env.ENVIRONMENT === 'prod',
+      sameSite: 'strict',
+      path: '/',
+      maxAge: MS_IN_DAY
+    })
     .json({ message: 'Login successful' })
 }
 
 export async function isAdminAuthenticated(req, res) {
-  const cookie = req.cookies?.auth
+  const cookie = req.cookies?.[getAuthCookieName()]
 
   if (!cookie) {
     return res
@@ -41,30 +53,134 @@ export async function isAdminAuthenticated(req, res) {
   }
 
   let result
+
   try {
-    const [rows] = await pool.query('SELECT session_id, expires FROM admin_session WHERE id = ?', [1])
+    const [rows] = await pool.query(
+      'SELECT session_id, expires FROM admin_session WHERE id = ?',
+      [1]
+    )
+
     result = rows[0]
   }
   catch (err) {
     console.error(err)
+
     return res
       .status(500)
-      .json({ authenticated: false, message: 'Database error' })
+      .json({
+        authenticated: false,
+        message: 'Database error'
+      })
   }
 
-  if (!result || !crypto.timingSafeEqual(Buffer.from(cookie), Buffer.from(result.session_id))) {
+  if (!result?.session_id) {
     return res
       .status(401)
-      .json({ authenticated: false, message: 'Unauthenticated' })
+      .json({
+        authenticated: false,
+        message: 'Unauthenticated'
+      })
   }
 
-  if (Date.now() > new Date(result.expires)) {
-    await pool.query('UPDATE admin_session SET session_id = ?, expires = ? WHERE id = ?', [null, null, 1])
+  const provided = Buffer.from(cookie)
+  const expected = Buffer.from(result.session_id)
+
+  if (
+    provided.length !== expected.length ||
+    !crypto.timingSafeEqual(provided, expected)
+  ) {
+    return res
+      .status(401)
+      .json({
+        authenticated: false,
+        message: 'Unauthenticated'
+      })
+  }
+
+  if (Date.now() > new Date(result.expires).getTime()) {
+    await pool.query(
+      'UPDATE admin_session SET session_id = ?, expires = ? WHERE id = ?',
+      [null, null, 1]
+    )
 
     return res
       .status(401)
-      .json({ authenticated: false, message: 'Unauthenticated' })
+      .json({
+        authenticated: false,
+        message: 'Unauthenticated'
+      })
   }
 
-  res.json({ authenticated: true, message: 'Authentication successful' })
+  res.json({
+    authenticated: true,
+    message: 'Authentication successful'
+  })
+}
+
+export async function requireAdmin(req, res, next) {
+  const cookieToken = req.cookies?.[getAuthCookieName()]
+  const header = req.get('Authorization')
+
+  let token = cookieToken
+
+  if (!token && header?.startsWith('Bearer ')) {
+    token = header.slice(7)
+  }
+
+  if (!token) {
+    return res.status(401).json({
+      message: 'Authentication required'
+    })
+  }
+
+  try {
+    const [rows] = await pool.query(
+      'SELECT session_id, expires FROM admin_session WHERE id = ?',
+      [1]
+    )
+
+    const session = rows[0]
+
+    if (!session?.session_id || !session.expires) {
+      return res.status(401).json({
+        message: 'Unauthenticated'
+      })
+    }
+
+    const expected = Buffer.from(session.session_id)
+    const provided = Buffer.from(token)
+
+    /*
+      timingSafeEqual() throws if the Buffers have different lengths,
+      so check the length before comparing.
+    */
+    if (
+      expected.length !== provided.length ||
+      !crypto.timingSafeEqual(expected, provided)
+    ) {
+      return res.status(401).json({
+        message: 'Unauthenticated'
+      })
+    }
+
+    if (Date.now() > new Date(session.expires).getTime()) {
+      await pool.query(
+        'UPDATE admin_session SET session_id = ?, expires = ? WHERE id = ?',
+        [null, null, 1]
+      )
+
+      return res.status(401).json({
+        message: 'Session expired'
+      })
+    }
+
+    next()
+  }
+  catch (err) {
+    console.error(err)
+
+    return res.status(500).json({
+      message: 'Database error'
+    })
+  }
 }
