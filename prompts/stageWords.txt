@@ -30,22 +30,44 @@ If a word or phrase has multiple DISTINCT meanings:
 
 SOURCE IDs AND ROW IDs
 
-* `sourceId` MUST equal the input `id` exactly.
-* `sourceId` MUST remain identical for every output row generated from that input.
-* `rowId` identifies the generated sense.
-* Number senses starting at 1 and incrementing by 1 in output order.
-* Format: `rowId = sourceId + "_" + senseNumber`
-* Example: sourceId `asdf` with 2 meanings produces `asdf_1` and `asdf_2`.
-* Never alter, generate, renumber, omit, or convert `sourceId`.
-* Additional senses must immediately follow the first sense.
+For EACH input element, first copy its id value exactly. Treat this copied value as sourceId.
+
+sourceId MUST be an exact character-for-character copy of that input element's id.
+Do NOT derive, infer, transform, recreate, or generate sourceId.
+Do NOT use es, en, rowId, or any other field to determine sourceId.
+NEVER output undefined, null, an empty string, or an omitted sourceId.
+Every output row generated from one input element MUST use the same copied sourceId.
+rowId MUST be created only after sourceId is copied.
+rowId = sourceId + "_" + senseNumber
+Sense numbering starts at 1 for each input element.
+Additional senses must immediately follow the first sense.
+
+Example:
+
+Input:
+{
+"id": "abc123",
+"es": "Malla",
+"en": "Mesh"
+}
+
+Every output row for this input MUST contain:
+
+"sourceId": "abc123"
+
+NEVER output:
+
+"sourceId": "undefined"
+"sourceId": null
+"sourceId": ""
 
 OUTPUT SHAPE
 
 Each output object MUST contain exactly these top-level fields:
 
 {
-"sourceId": "input id",
-"rowId": "input id + _ + sense number",
+"sourceId": "COPIED INPUT id VALUE",
+"rowId": "EXACT INPUT id + _ + sense number",
 "record": { ...13 database fields... },
 "existingReferences": null
 }
@@ -85,9 +107,11 @@ spanish
 
 * Boricua Spanish only.
 * Store only the word or phrase.
-* Normal sentence casing.
+* The FIRST letter MUST be uppercase.
+* Use normal sentence casing for the rest.
 * Preserve accents.
 * No punctuation unless naturally part of the phrase.
+* Do NOT leave the first letter lowercase unless the word itself conventionally begins with a non-letter.
 
 GENDERED NOUN FORMATTING
 
@@ -188,11 +212,13 @@ Choose exactly ONE.
 english
 
 * Natural English equivalent.
-* Sentence casing.
+* The FIRST letter MUST be uppercase.
+* Use normal sentence casing for the rest.
 * Boricua meaning only.
 * If multiple translations are ESSENTIAL, join with `/`.
 * Maximum 4 translations.
 * Example: `Bus / SUV / Truck / Van`
+* Never return a lowercase first letter in `english`.
 
 literal
 
@@ -246,6 +272,7 @@ For an English-speaking adult learning Puerto Rican Spanish:
 4 Native-Level / Rare
 
 note
+
 Populate ONLY if useful:
 
 * regional usage
@@ -255,17 +282,23 @@ Populate ONLY if useful:
   Otherwise `null`.
 
 example
-Generate ONLY when confidence is high.
 
+Generate a natural example sentence for EVERY output row whenever the meaning can be demonstrated naturally and confidently.
+
+* MUST NOT be omitted merely because the field is optional.
+* Use `null` ONLY when a natural, accurate example cannot be produced with high confidence.
+* The example MUST clearly demonstrate the specific meaning of that row.
 * Natural
 * Concise
-* Demonstrates meaning
 * Preferably 5–15 words
-  Otherwise `null`.
+* Do not use examples that introduce an unrelated meaning.
 
 example_translation
-Translate `example`.
-If `example = null`, then `example_translation = null`.
+
+* MUST be populated whenever `example` is populated.
+* Translate the `example` accurately into natural English.
+* Preserve the meaning of the example.
+* If `example = null`, `example_translation = null`.
 
 vulgar
 
@@ -285,6 +318,7 @@ GLOBAL RULES
 * Trim whitespace.
 * Collapse duplicate spaces.
 * Preserve accents.
+* `spanish` and `english` MUST always begin with an uppercase letter.
 * Never invent meanings.
 * Never assume Puerto Rican usage unless known.
 * Prefer `null` over speculation.
@@ -300,6 +334,8 @@ GLOBAL RULES
 * Do not use `(a)` for words ending in `-o`.
 * Do not alter an already-correct gender representation.
 * If a word is invariable for gender, do not create a gender variant.
+* Before finalizing, verify every non-null `example` has a corresponding `example_translation`.
+* Before finalizing, verify every row has an `example` unless a confident natural example is genuinely impossible.
 
 EXAMPLE
 
@@ -327,8 +363,8 @@ Possible output:
 "theme": 1,
 "difficulty": 2,
 "note": null,
-"example": null,
-"example_translation": null,
+"example": "La malla evita que entren insectos.",
+"example_translation": "The mesh keeps insects from getting inside.",
 "vulgar": null,
 "loan_word": null
 },
@@ -347,8 +383,8 @@ Possible output:
 "theme": 8,
 "difficulty": 2,
 "note": null,
-"example": null,
-"example_translation": null,
+"example": "Me puse la malla para ir a la playa.",
+"example_translation": "I put on my swimsuit to go to the beach.",
 "vulgar": null,
 "loan_word": null
 },
@@ -362,20 +398,26 @@ Before finalizing:
 
 1. Every input element produced at least one output object.
 2. Every output object has exactly `sourceId`, `rowId`, `record`, `existingReferences`.
-3. `sourceId` exactly matches the input `id`.
-4. `rowId` uses the correct 1-based sense number.
-5. `record` contains exactly the 13 database fields.
-6. `existingReferences` is always `null`.
-7. All enum values are valid.
-8. JSON is valid.
-9. Output order is preserved.
-10. Additional meanings are inserted immediately after their source.
-11. Every noun has the correct `gender`/`gender_type` relationship.
-12. Every common noun has `gender = "U"`.
-13. Every epicene noun has `gender = "M"` or `"F"`, never `"U"`.
-14. Every adjective has `gender = null` and `gender_type = null`.
-15. Gender formatting follows all noun/adjective rules.
-16. No distinct lexical masculine/feminine entries are improperly combined.
+3. For every output row, `sourceId` MUST equal the `id` of its source input element character-for-character.
+4. `sourceId` is never `undefined`, `null`, empty, omitted, or generated.
+5. All output rows derived from one input element have identical `sourceId`.
+6. `rowId` uses the correct 1-based sense number.
+7. `record` contains exactly the 13 database fields.
+8. `existingReferences` is always `null`.
+9. All enum values are valid.
+10. JSON is valid.
+11. Output order is preserved.
+12. Additional meanings are inserted immediately after their source.
+13. Every noun has the correct `gender`/`gender_type` relationship.
+14. Every common noun has `gender = "U"`.
+15. Every epicene noun has `gender = "M"` or `"F"`, never `"U"`.
+16. Every adjective has `gender = null` and `gender_type = null`.
+17. Gender formatting follows all noun/adjective rules.
+18. No distinct lexical masculine/feminine entries are improperly combined.
+19. Every non-null `example` has a non-null `example_translation`.
+20. Every output row has a natural `example` unless one cannot be produced confidently.
+21. The first letter of every non-null `spanish` value is uppercase.
+22. The first letter of every non-null `english` value is uppercase.
 
 OUTPUT CONTRACT
 

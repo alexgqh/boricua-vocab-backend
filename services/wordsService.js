@@ -134,10 +134,8 @@ async function initExistingReferences(wordPairs) {
           `(^| / )(${words.join('|')})( / |$)`
       }
 
-      // console.log(checks)
       return checks
     })
-
 
     /*
       Run the Spanish and English checks for each wordPair.
@@ -221,7 +219,6 @@ async function initExistingReferences(wordPairs) {
             record => sharedReferenceIDs.has(record.id)
           )
         }
-
 
         /*
           Return the original request ID along with its references.
