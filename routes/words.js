@@ -7,7 +7,7 @@ const router = Router()
 
 router.get('/', getWordBank)
 
-router.post('/translate', translate)
+router.post('/translate', requireAdmin, translate)
 router.post('/references', requireAdmin, getExistingReferences)
 
 router.post('/stage', requireAdmin, stageWords)
