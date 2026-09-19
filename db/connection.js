@@ -1,6 +1,6 @@
 import { createPool } from "mysql2"
 
-// 1. Load the environment variables first!
+// Load the environment variables
 import 'dotenv/config'
 
 const pool = createPool({
@@ -9,7 +9,7 @@ const pool = createPool({
   password: process.env.DB_PASS,
   port: process.env.DB_PORT,
   database: process.env.DB_NAME,
-  multipleStatements: true //Allows you to send multiple semicolon-separated commands at once
+  multipleStatements: true //Allows you to send multiple semicolon-separated queries at once
 }).promise()
 
 export { pool }

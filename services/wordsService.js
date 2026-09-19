@@ -21,6 +21,10 @@ export async function getWordBank(req, res) {
 
 //words/translate
 export async function translate(req, res) {
+  /*
+    contents: string
+    langFrom: 'es' | 'en'
+  */
   const { contents, langFrom } = req.body
 
   try {
