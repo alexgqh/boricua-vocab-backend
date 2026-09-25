@@ -284,31 +284,41 @@ async function validateRegistration(username, email, password) {
 
   // Database checks:
   // 9. Is username unique? Is email unique?
-  const [usernameResult, emailResult] = await Promise.all([
-    pool.query(`SELECT COUNT(1) AS \`exists\` FROM users WHERE username = ?`, [username]),
-    pool.query(`SELECT COUNT(1) AS \`exists\` FROM users WHERE email = ?`, [email])
-  ])
-  const [usernameExists] = usernameResult
-  if (usernameExists[0].exists > 0) {
-    result.message = `The username "${username}" is already in use`
-    return result
-  }
-  const [emailExists] = emailResult
-  if (emailExists[0].exists > 0) {
-    result.message = `The email address "${email}" is already in use`
-    return result
+  {
+    const [rows] = await pool.query(
+      `
+        SELECT
+          EXISTS(
+            SELECT 1
+            FROM users
+            WHERE username = ?
+          ) AS username_exists,
+    
+          EXISTS(
+            SELECT 1
+            FROM users
+            WHERE email = ?
+          ) AS email_exists
+      `,
+      [username, email]
+    )
+    
+    const { username_exists, email_exists } = rows[0]
+    
+    if (username_exists) {
+      result.message = `The username "${username}" is already in use`
+      return result
+    }
+    
+    if (email_exists) {
+      result.message = `The email address "${email}" is already in use`
+      return result
+    }
   }
 
   result.success = true
   return result
 }
 
-
-      // const validCharacters = [...new Set(password_regex_pattern)]
-      // const invalidCharacters = [...password].filter(char => !validCharacters.includes(char))
-      // result.message =
-      //   `Your password contains the following invalid characters:
-      //   ${invalidCharacters
-      //     .forEach((invalidChar, i) => {
-      //       return `'${invalidChar}'${i < invalidCharacters.length - 1 ? ', ' : ''}` )}`
-      //     }
+// const result = await validateRegistration('alex', 'asdf@gmail.com', 'asdffj')
+// console.log(result)
