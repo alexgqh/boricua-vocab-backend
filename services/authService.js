@@ -38,11 +38,16 @@ BORICUA_BANNED_USERNAME_TERMS.forEach(term => {
   )
 })
 
-//Helper function to return auth cookie name
-function getAuthCookieName() {
+//Helper functions to return cookie names
+function getAdminAuthCookieName() {
   return process.env.ENVIRONMENT === 'prod'
     ? '__Host-auth'
     : 'auth'
+}
+function getUserSessionCookieName() {
+  return process.env.ENVIRONMENT === 'prod'
+    ? '__Host-session'
+    : 'session'
 }
 
 // Build one matcher containing both English and Boricua profanity.
@@ -75,7 +80,7 @@ export async function authenticateAdmin(req, res) {
 
   res
     .status(200)
-    .cookie(getAuthCookieName(), sessionID, {
+    .cookie(getAdminAuthCookieName(), sessionID, {
       httpOnly: true,
       secure: process.env.ENVIRONMENT === 'prod',
       sameSite: 'strict',
@@ -86,7 +91,7 @@ export async function authenticateAdmin(req, res) {
 }
 
 export async function isAdminAuthenticated(req, res) {
-  const cookie = req.cookies?.[getAuthCookieName()]
+  const cookie = req.cookies?.[getAdminAuthCookieName()]
 
   if (!cookie) {
     return res
@@ -160,7 +165,7 @@ export async function isAdminAuthenticated(req, res) {
 }
 
 export async function requireAdmin(req, res, next) {
-  const cookieToken = req.cookies?.[getAuthCookieName()]
+  const cookieToken = req.cookies?.[getAdminAuthCookieName()]
   const header = req.get('Authorization')
 
   let token = cookieToken
@@ -242,9 +247,7 @@ export async function registerUser(req, res) {
     }
   
     // 3. Hash password
-    const password_hash = await argon2.hash(password, {
-      type: argon2.argon2id
-    })
+    const password_hash = await hashPassword(password)
   
     // 4. Create user
     const normalizedUsername = validationResults.username
@@ -261,11 +264,33 @@ export async function registerUser(req, res) {
         message: creationResults.message
       })
     }
+
+    // 6. Create user session
+    const sessionResults = await createUserSession(creationResults.userId)
+
+    // 7. Make sure session was created
+    if (!sessionResults.success) {
+      return res.status(201).json({
+        message: 'Account created successfully, but you could not be signed in automatically. Please log in.'
+      })
+    }
   
-    // 6. Registration completed successfully
-    return res.status(201).json({
-      message: `Bienvenidos, ${validationResults.username}!`
-    })
+    // 8. Registration completed and session created successfully
+    return res
+      .status(201)
+      .cookie(
+        getUserSessionCookieName(),
+        sessionResults.token,
+        {
+          httpOnly: true,
+          secure: process.env.ENVIRONMENT === 'prod',
+          sameSite: 'strict',
+          path: '/'
+        }
+      )
+      .json({
+        message: `Bienvenidos, ${validationResults.username}!`
+      })
   }
   catch (err) {
     console.error(err)
@@ -274,6 +299,13 @@ export async function registerUser(req, res) {
       message: 'Internal server error'
     })
   }
+}
+
+async function hashPassword(password) {
+  const password_hash = await argon2.hash(password, {
+    type: argon2.argon2id
+  })
+  return password_hash
 }
 
 async function validateRegistration(username, email, password) {
@@ -411,6 +443,52 @@ async function createUser(username, email, password_hash) {
       return result
     }
 
+    return result
+  }
+}
+
+async function createUserSession(userId) {
+  const result = {
+    success: false,
+    message: 'Failed to create session'
+  }
+
+  // Generate 32 cryptographically random bytes and turn them
+  // into a browser-friendly string.
+  const token = crypto.randomBytes(32).toString('base64url')
+
+  // Store only a SHA-256 hash of the token in the database.
+  // .digest() with no encoding returns a 32-byte Buffer,
+  // which fits sessions.token_hash BINARY(32).
+  const tokenHash = crypto
+    .createHash('sha256')
+    .update(token)
+    .digest()
+
+  const expiresAt = new Date(Date.now() + MS_IN_DAY)
+
+  try {
+    const [queryResult] = await pool.query(
+      `
+        INSERT INTO sessions
+          (user_id, token_hash, expires_at)
+        VALUES (?, ?, ?)
+      `,
+      [userId, tokenHash, expiresAt]
+    )
+
+    if (queryResult.affectedRows !== 1) {
+      return result
+    }
+
+    return {
+      success: true,
+      token,
+      expiresAt
+    }
+  }
+  catch (err) {
+    console.error(err.message)
     return result
   }
 }
