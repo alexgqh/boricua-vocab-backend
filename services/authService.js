@@ -1,5 +1,6 @@
 import 'dotenv/config' //Load the environment variables
 import crypto from 'crypto'
+import argon2 from 'argon2'
 import { pool } from '../db/connection.js'
 import { 
   MS_IN_DAY,
@@ -19,11 +20,10 @@ import {
 
 import { BORICUA_BANNED_USERNAME_TERMS } from '../data/bannedUsernameWords.js'
 
-function getAuthCookieName() {
-  return process.env.ENVIRONMENT === 'prod'
-    ? '__Host-auth'
-    : 'auth'
-}
+// Define constants
+const USERNAME_LEN_REQ = { min: 3, max: 32 }
+const PASSWORD_LEN_REQ = { min: 8, max: 256 }
+const EMAIL_LEN_MAX = 255
 
 // Start with Obscenity's built-in English profanity dataset.
 const profanityDataset = new DataSet()
@@ -37,6 +37,13 @@ BORICUA_BANNED_USERNAME_TERMS.forEach(term => {
       .addPattern(parseRawPattern(term))
   )
 })
+
+//Helper function to return auth cookie name
+function getAuthCookieName() {
+  return process.env.ENVIRONMENT === 'prod'
+    ? '__Host-auth'
+    : 'auth'
+}
 
 // Build one matcher containing both English and Boricua profanity.
 const profanityMatcher = new RegExpMatcher({
@@ -220,12 +227,56 @@ export async function requireAdmin(req, res, next) {
   }
 }
 
-async function validateRegistration(username, email, password) {
-  // Define constants
-  const USERNAME_LEN_REQ = { min: 3, max: 32 }
-  const PASSWORD_LEN_REQ = { min: 6, max: 32 }
-  const EMAIL_LEN_MAX = 255
+export async function registerUser(req, res) {
+  try {
+    // 1. Read request body
+    const { username, email, password } = req.body ?? {}
+  
+    // 2. Validate that supplied credentials are valid for their respective fields
+    const validationResults = await validateRegistration(username, email, password)
+  
+    if (!validationResults.success) {
+      return res.status(validationResults.status ?? 400).json({
+        message: validationResults.message
+      })
+    }
+  
+    // 3. Hash password
+    const password_hash = await argon2.hash(password, {
+      type: argon2.argon2id
+    })
+  
+    // 4. Create user
+    const normalizedUsername = validationResults.username
+    const normalizedEmail = validationResults.email
+    const creationResults = await createUser(
+      normalizedUsername,
+      normalizedEmail,
+      password_hash
+    )
+  
+    // 5. Make sure user was created
+    if (!creationResults.success) {
+      return res.status(creationResults.status ?? 500).json({
+        message: creationResults.message
+      })
+    }
+  
+    // 6. Registration completed successfully
+    return res.status(201).json({
+      message: `Bienvenidos, ${validationResults.username}!`
+    })
+  }
+  catch (err) {
+    console.error(err)
 
+    return res.status(500).json({
+      message: 'Internal server error'
+    })
+  }
+}
+
+async function validateRegistration(username, email, password) {
   // Initialize return object
   const result = {
     success: false,
@@ -271,14 +322,14 @@ async function validateRegistration(username, email, password) {
     return result
   }
 
-  // 7. Is password 6–32 characters?
+  // 7. Is password 8–256 characters?
   if (!isStringLengthBetween(PASSWORD_LEN_REQ.min, PASSWORD_LEN_REQ.max, password)) {
     result.message = `Your password must be between ${PASSWORD_LEN_REQ.min} and ${PASSWORD_LEN_REQ.max} characters long`
     return result
   }
 
   // 8. Does the password have at least one letter?
-  if (!/[a-zA-Z]/.test(password)) {
+  if (!/\p{L}/u.test(password)) {
     return { ...result, message: 'Your password must contain at least one letter' }
   }
 
@@ -307,17 +358,61 @@ async function validateRegistration(username, email, password) {
     
     if (username_exists) {
       result.message = `The username "${username}" is already in use`
+      result.status = 409
       return result
     }
     
     if (email_exists) {
       result.message = `The email address "${email}" is already in use`
+      result.status = 409
       return result
     }
   }
 
   result.success = true
+  result.username = username
+  result.email = email
   return result
+}
+
+async function createUser(username, email, password_hash) {
+  const result = {
+    success: false,
+    message: 'Failed to add user'
+  }
+
+  try {
+    // 1. Run query to create user
+    const [queryResult] = await pool.query(`
+      INSERT INTO users
+        (username, email, password_hash)
+      VALUES (?, ?, ?);`,
+      [username, email, password_hash]
+    )
+  
+    // 2. Verify that the user was added
+    if (queryResult.affectedRows !== 1) {
+      return result
+    }
+  
+    // 3. Return success status and user id
+    return {
+      success: true,
+      userId: queryResult.insertId
+    }
+  }
+  catch (err) {
+    // Query failed to run
+    console.error(err.message)
+
+    if (err.code === 'ER_DUP_ENTRY') {
+      result.message = 'That username or email address is already in use'
+      result.status = 409
+      return result
+    }
+
+    return result
+  }
 }
 
 // const result = await validateRegistration('alex', 'asdf@gmail.com', 'asdffj')
