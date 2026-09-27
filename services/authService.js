@@ -19,12 +19,17 @@ import {
 } from 'obscenity'
 
 import { BORICUA_BANNED_USERNAME_TERMS } from '../data/bannedUsernameWords.js'
-import { execPath } from 'process'
 
 // Define constants
 const USERNAME_LEN_REQ = { min: 3, max: 32 }
 const PASSWORD_LEN_REQ = { min: 8, max: 256 }
 const EMAIL_LEN_MAX = 255
+const COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: process.env.ENVIRONMENT === 'prod',
+  sameSite: 'strict',
+  path: '/'
+}
 
 // Start with Obscenity's built-in English profanity dataset.
 const profanityDataset = new DataSet()
@@ -46,7 +51,7 @@ const profanityMatcher = new RegExpMatcher({
 })
 
 export async function authenticateAdmin(req, res) {
-  const { username, password } = req.body
+  const { username, password } = req.body ?? {}
 
   if (
     username !== process.env.ADMIN_USER ||
@@ -55,11 +60,15 @@ export async function authenticateAdmin(req, res) {
     return res.status(401).json({ message: 'Invalid credentials' })
   }
 
-  const sessionID = crypto.randomBytes(32).toString('hex')
+  const token = crypto.randomBytes(32).toString('hex')
+  const tokenHash = hashToken(token)
   const expiration = new Date(Date.now() + MS_IN_DAY)
 
   try {
-    await pool.query('UPDATE admin_session SET session_id = ?, expires = ? WHERE id = ?', [sessionID, expiration, 1])
+    await pool.query(
+      'UPDATE admin_session SET token_hash = ?, expires_at = ? WHERE id = ?',
+      [tokenHash, expiration, 1]
+    )
   } catch (err) {
     console.error(err)
     return res
@@ -69,20 +78,17 @@ export async function authenticateAdmin(req, res) {
 
   res
     .status(200)
-    .cookie(getAdminAuthCookieName(), sessionID, {
-      httpOnly: true,
-      secure: process.env.ENVIRONMENT === 'prod',
-      sameSite: 'strict',
-      path: '/',
+    .cookie(getAdminSessionCookieName(), token, {
+      ...COOKIE_OPTIONS,
       maxAge: MS_IN_DAY
     })
     .json({ message: 'Login successful' })
 }
 
 export async function isAdminAuthenticated(req, res) {
-  const cookie = req.cookies?.[getAdminAuthCookieName()]
+  const token = req.cookies?.[getAdminSessionCookieName()]
 
-  if (!cookie) {
+  if (!token) {
     return res
       .status(401)
       .json({ authenticated: false })
@@ -92,7 +98,7 @@ export async function isAdminAuthenticated(req, res) {
 
   try {
     const [rows] = await pool.query(
-      'SELECT session_id, expires FROM admin_session WHERE id = ?',
+      'SELECT token_hash, expires_at FROM admin_session WHERE id = ?',
       [1]
     )
 
@@ -109,7 +115,9 @@ export async function isAdminAuthenticated(req, res) {
       })
   }
 
-  if (!result?.session_id) {
+  if (!result?.token_hash) {
+    clearAdminSessionCookie(res)
+
     return res
       .status(401)
       .json({
@@ -118,26 +126,14 @@ export async function isAdminAuthenticated(req, res) {
       })
   }
 
-  const provided = Buffer.from(cookie)
-  const expected = Buffer.from(result.session_id)
+  const providedHash = hashToken(token)
+  const expectedHash = result.token_hash
 
   if (
-    provided.length !== expected.length ||
-    !crypto.timingSafeEqual(provided, expected)
+    providedHash.length !== expectedHash.length ||
+    !crypto.timingSafeEqual(providedHash, expectedHash)
   ) {
-    return res
-      .status(401)
-      .json({
-        authenticated: false,
-        message: 'Unauthenticated'
-      })
-  }
-
-  if (Date.now() > new Date(result.expires).getTime()) {
-    await pool.query(
-      'UPDATE admin_session SET session_id = ?, expires = ? WHERE id = ?',
-      [null, null, 1]
-    )
+    clearAdminSessionCookie(res)
 
     return res
       .status(401)
@@ -146,6 +142,21 @@ export async function isAdminAuthenticated(req, res) {
         message: 'Unauthenticated'
       })
   }
+  
+  // Check if admin session expired
+  if (Date.now() > new Date(result.expires_at).getTime()) {
+    // Clear admin session
+    clearAdminSessionCookie(res)
+    await deleteAdminSession()
+
+    return res
+      .status(401)
+      .json({
+        authenticated: false,
+        message: 'Unauthenticated'
+      })
+  }
+  
 
   res.json({
     authenticated: true,
@@ -154,7 +165,7 @@ export async function isAdminAuthenticated(req, res) {
 }
 
 export async function requireAdmin(req, res, next) {
-  const cookieToken = req.cookies?.[getAdminAuthCookieName()]
+  const cookieToken = req.cookies?.[getAdminSessionCookieName()]
   const header = req.get('Authorization')
 
   let token = cookieToken
@@ -171,40 +182,42 @@ export async function requireAdmin(req, res, next) {
 
   try {
     const [rows] = await pool.query(
-      'SELECT session_id, expires FROM admin_session WHERE id = ?',
+      'SELECT token_hash, expires_at FROM admin_session WHERE id = ?',
       [1]
     )
 
     const session = rows[0]
 
-    if (!session?.session_id || !session.expires) {
+    if (!session?.token_hash || !session.expires_at) {
+      clearAdminSessionCookie(res)
+
       return res.status(401).json({
         message: 'Unauthenticated'
       })
     }
 
-    const expected = Buffer.from(session.session_id)
-    const provided = Buffer.from(token)
+    const expectedHash = session.token_hash
+    const providedHash = hashToken(token)
 
     /*
       timingSafeEqual() throws if the Buffers have different lengths,
       so check the length before comparing.
     */
     if (
-      expected.length !== provided.length ||
-      !crypto.timingSafeEqual(expected, provided)
+      expectedHash.length !== providedHash.length ||
+      !crypto.timingSafeEqual(expectedHash, providedHash)
     ) {
+      clearAdminSessionCookie(res)
+
       return res.status(401).json({
         message: 'Unauthenticated'
       })
     }
 
-    if (Date.now() > new Date(session.expires).getTime()) {
-      await pool.query(
-        'UPDATE admin_session SET session_id = ?, expires = ? WHERE id = ?',
-        [null, null, 1]
-      )
-
+    // Check if admin session is expired
+    if (Date.now() > new Date(session.expires_at).getTime()) {
+      await deleteAdminSession()
+      clearAdminSessionCookie(res)
       return res.status(401).json({
         message: 'Session expired'
       })
@@ -270,12 +283,7 @@ export async function registerUser(req, res) {
       .cookie(
         getSessionCookieName(),
         sessionResults.token,
-        {
-          httpOnly: true,
-          secure: process.env.ENVIRONMENT === 'prod',
-          sameSite: 'strict',
-          path: '/'
-        }
+        COOKIE_OPTIONS
       )
       .json({
         message: `Bienvenidos, ${validationResults.username}!`
@@ -538,7 +546,20 @@ async function getValidSession(token) {
 }
 
 // Is this request associated with a valid user session?
-export async function authenticateSession(req, res) {
+// (This function assumes that requireUser() runs before it)
+export function authenticateSession(req, res) {
+  return res
+    .status(200)
+    .json({
+      authenticated: true,
+      message: 'Session authenticated',
+      username: req.user.username,
+      userId: req.user.id
+    })
+}
+
+export async function requireUser(req, res, next) {
+  // Read cookie
   const token = req.cookies?.[getSessionCookieName()]
 
   // Make sure session cookie exists
@@ -574,20 +595,16 @@ export async function authenticateSession(req, res) {
       })
   }
 
-  // Session validated successfully
-  return res
-    .status(200)
-    .json({
-      authenticated: true,
-      message: 'Session authenticated',
-      username: sessionResults.username,
-      userId: sessionResults.userId
-    })
+  req.user = {
+    id: sessionResults.userId,
+    username: sessionResults.username
+  }
+  next()
 }
 
 //// HELPER FUNCTIONS ////
 
-function getAdminAuthCookieName() {
+function getAdminSessionCookieName() {
   return process.env.ENVIRONMENT === 'prod'
     ? '__Host-auth'
     : 'auth'
@@ -615,12 +632,11 @@ async function hashPassword(password) {
 }
 
 function clearSessionCookie(res) {
-  res.clearCookie(getSessionCookieName(), {
-    httpOnly: true,
-    secure: process.env.ENVIRONMENT === 'prod',
-    sameSite: 'strict',
-    path: '/'
-  })
+  res.clearCookie(getSessionCookieName(), COOKIE_OPTIONS)
+}
+
+function clearAdminSessionCookie(res) {
+  res.clearCookie(getAdminSessionCookieName(), COOKIE_OPTIONS)
 }
 
 async function deleteSession(sessionId) {
@@ -631,6 +647,18 @@ async function deleteSession(sessionId) {
         WHERE id = ?
       `,
       [sessionId]
+    )
+  }
+  catch (err) {
+    console.error(err.message)
+  }
+}
+
+async function deleteAdminSession() {
+  try {
+    await pool.query(
+      'UPDATE admin_session SET token_hash = ?, expires_at = ? WHERE id = ?',
+      [null, null, 1]
     )
   }
   catch (err) {
