@@ -33,10 +33,10 @@ app.use(cors({
 //create endpoint routes
 import wordsRouter from './routes/words.js'
 import adminRouter from './routes/admin.js'
-import userRouter from './routes/user.js'
+import authRouter from './routes/auth.js'
 app.use('/words', wordsRouter)
 app.use('/admin', adminRouter)
-app.use('/user', userRouter)
+app.use('/auth', authRouter)
 
 //launch app on specified port
 app.listen(port, () => console.log(`Server started on port ${port}`))

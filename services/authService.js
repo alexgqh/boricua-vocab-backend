@@ -19,6 +19,7 @@ import {
 } from 'obscenity'
 
 import { BORICUA_BANNED_USERNAME_TERMS } from '../data/bannedUsernameWords.js'
+import { execPath } from 'process'
 
 // Define constants
 const USERNAME_LEN_REQ = { min: 3, max: 32 }
@@ -37,18 +38,6 @@ BORICUA_BANNED_USERNAME_TERMS.forEach(term => {
       .addPattern(parseRawPattern(term))
   )
 })
-
-//Helper functions to return cookie names
-function getAdminAuthCookieName() {
-  return process.env.ENVIRONMENT === 'prod'
-    ? '__Host-auth'
-    : 'auth'
-}
-function getUserSessionCookieName() {
-  return process.env.ENVIRONMENT === 'prod'
-    ? '__Host-session'
-    : 'session'
-}
 
 // Build one matcher containing both English and Boricua profanity.
 const profanityMatcher = new RegExpMatcher({
@@ -265,8 +254,8 @@ export async function registerUser(req, res) {
       })
     }
 
-    // 6. Create user session
-    const sessionResults = await createUserSession(creationResults.userId)
+    // 6. Create session
+    const sessionResults = await createSession(creationResults.userId)
 
     // 7. Make sure session was created
     if (!sessionResults.success) {
@@ -279,7 +268,7 @@ export async function registerUser(req, res) {
     return res
       .status(201)
       .cookie(
-        getUserSessionCookieName(),
+        getSessionCookieName(),
         sessionResults.token,
         {
           httpOnly: true,
@@ -299,13 +288,6 @@ export async function registerUser(req, res) {
       message: 'Internal server error'
     })
   }
-}
-
-async function hashPassword(password) {
-  const password_hash = await argon2.hash(password, {
-    type: argon2.argon2id
-  })
-  return password_hash
 }
 
 async function validateRegistration(username, email, password) {
@@ -447,7 +429,7 @@ async function createUser(username, email, password_hash) {
   }
 }
 
-async function createUserSession(userId) {
+async function createSession(userId) {
   const result = {
     success: false,
     message: 'Failed to create session'
@@ -460,10 +442,7 @@ async function createUserSession(userId) {
   // Store only a SHA-256 hash of the token in the database.
   // .digest() with no encoding returns a 32-byte Buffer,
   // which fits sessions.token_hash BINARY(32).
-  const tokenHash = crypto
-    .createHash('sha256')
-    .update(token)
-    .digest()
+  const tokenHash = hashToken(token)
 
   const expiresAt = new Date(Date.now() + MS_IN_DAY)
 
@@ -493,5 +472,168 @@ async function createUserSession(userId) {
   }
 }
 
-// const result = await validateRegistration('alex', 'asdf@gmail.com', 'asdffj')
-// console.log(result)
+async function getValidSession(token) {
+  const result = {
+    authenticated: false,
+    message: 'Not authorized',
+    status: 401,
+    deleteSession: false,
+    clearCookie: true
+  }
+
+  try {
+    // Hash token
+    const tokenHash = hashToken(token)
+
+    // Read database
+    const [rows] = await pool.query(`
+      SELECT
+        sessions.id,
+        sessions.user_id,
+        sessions.expires_at,
+        users.username
+      FROM sessions
+      JOIN users
+        ON users.id = sessions.user_id
+      WHERE sessions.token_hash = ?
+      LIMIT 1
+    `, [tokenHash])
+
+    // Check if session exists
+    const session = rows?.[0]
+    if (!session) {
+      return result
+    }
+
+    // Check if session is expired
+    const expiration = session.expires_at
+    if (new Date(expiration).getTime() <= Date.now()) {
+      
+      // Pass information along so the session may be deleted
+      result.deleteSession = true
+      result.sessionId = session.id
+
+      // Return 401 failure
+      result.message = 'Session expired'
+      return result
+    }
+
+    // Session authenticated
+    return {
+      authenticated: true,
+      username: session.username,
+      userId: session.user_id
+    }
+  }
+  catch (err) {
+    console.error(err.message)
+    return {
+      authenticated: false,
+      message: 'Failed to communicate with database',
+      status: 500,
+      clearCookie: false,
+      deleteSession: false,
+    }
+  }
+}
+
+// Is this request associated with a valid user session?
+export async function authenticateSession(req, res) {
+  const token = req.cookies?.[getSessionCookieName()]
+
+  // Make sure session cookie exists
+  if (!token) {
+    return res.status(401).json({
+      authenticated: false,
+      message: 'Not authorized'
+    })
+  }
+
+  // Validate session
+  const sessionResults = await getValidSession(token)
+
+  // Check if session is authenticated
+  if (!sessionResults.authenticated) {
+      
+    // Clear cookie to prevent checking db needlessly in the future
+    if (sessionResults.clearCookie) {
+      clearSessionCookie(res)
+    }
+
+    // Delete session if expired
+    if (sessionResults.deleteSession) {
+      await deleteSession(sessionResults.sessionId)
+    }
+  
+    // Return failure
+    return res
+      .status(sessionResults.status ?? 500)
+      .json({
+        authenticated: false,
+        message: sessionResults.message
+      })
+  }
+
+  // Session validated successfully
+  return res
+    .status(200)
+    .json({
+      authenticated: true,
+      message: 'Session authenticated',
+      username: sessionResults.username,
+      userId: sessionResults.userId
+    })
+}
+
+//// HELPER FUNCTIONS ////
+
+function getAdminAuthCookieName() {
+  return process.env.ENVIRONMENT === 'prod'
+    ? '__Host-auth'
+    : 'auth'
+}
+
+function getSessionCookieName() {
+  return process.env.ENVIRONMENT === 'prod'
+    ? '__Host-session'
+    : 'session'
+}
+
+function hashToken(token) {
+  const tokenHash = crypto
+    .createHash('sha256')
+    .update(token)
+    .digest()
+  return tokenHash
+}
+
+async function hashPassword(password) {
+  const password_hash = await argon2.hash(password, {
+    type: argon2.argon2id
+  })
+  return password_hash
+}
+
+function clearSessionCookie(res) {
+  res.clearCookie(getSessionCookieName(), {
+    httpOnly: true,
+    secure: process.env.ENVIRONMENT === 'prod',
+    sameSite: 'strict',
+    path: '/'
+  })
+}
+
+async function deleteSession(sessionId) {
+  try {
+    await pool.query(
+      `
+        DELETE FROM sessions
+        WHERE id = ?
+      `,
+      [sessionId]
+    )
+  }
+  catch (err) {
+    console.error(err.message)
+  }
+}
