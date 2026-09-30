@@ -21,3 +21,8 @@ export const normalizeForProfanityCheck = (string) => {
     .toLowerCase()
 }
 export const escapeRegex = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const isValidDate = (date) => date instanceof Date && !isNaN(date)
+export const isFutureDate = (date) => {
+  const d = new Date(date)
+  return isValidDate(d) && d.getTime() > Date.now()
+}

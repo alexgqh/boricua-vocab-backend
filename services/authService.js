@@ -8,6 +8,7 @@ import {
   isStringLengthBetween,
   normalizeForProfanityCheck,
   EMAIL_REGEX,
+  isFutureDate,
 } from '../utils/common.js'
 
 import {
@@ -30,6 +31,7 @@ const COOKIE_OPTIONS = {
   sameSite: 'strict',
   path: '/'
 }
+const DUMMY_HASH = await hashPassword('this dummy hash will be used to prevent timing discrepancies')
 
 // Start with Obscenity's built-in English profanity dataset.
 const profanityDataset = new DataSet()
@@ -51,6 +53,13 @@ const profanityMatcher = new RegExpMatcher({
 })
 
 export async function authenticateAdmin(req, res) {
+  if (!process.env.ADMIN_USER || !process.env.ADMIN_PASS) {
+    console.error('Admin username and/or password are not configured')
+    return res.status(500).json({
+      message: 'Internal authentication error'
+    })
+  }
+
   const { username, password } = req.body ?? {}
 
   if (
@@ -65,15 +74,22 @@ export async function authenticateAdmin(req, res) {
   const expiration = new Date(Date.now() + MS_IN_DAY)
 
   try {
-    await pool.query(
+    const [result] = await pool.query(
       'UPDATE admin_session SET token_hash = ?, expires_at = ? WHERE id = ?',
       [tokenHash, expiration, 1]
     )
+
+    if (result.affectedRows !== 1) {
+      console.error('Unexpected number of rows affected in admin_session')
+      return res
+        .status(500)
+        .json({ message: 'Internal authentication error'})
+    }
   } catch (err) {
     console.error(err)
     return res
       .status(500)
-      .json({ message: 'Database error' })
+      .json({ message: 'Internal authentication error' })
   }
 
   res
@@ -85,99 +101,20 @@ export async function authenticateAdmin(req, res) {
     .json({ message: 'Login successful' })
 }
 
-export async function isAdminAuthenticated(req, res) {
+async function validateAdminSession(req) {
+  const result = {
+    authenticated: false,
+    status: 401,
+    message: 'Authentication required',
+    clearCookie: true,
+    clearSession: false
+  }
+
   const token = req.cookies?.[getAdminSessionCookieName()]
 
   if (!token) {
-    return res
-      .status(401)
-      .json({ authenticated: false })
-  }
-
-  let result
-
-  try {
-    const [rows] = await pool.query(
-      'SELECT token_hash, expires_at FROM admin_session WHERE id = ?',
-      [1]
-    )
-
-    result = rows[0]
-  }
-  catch (err) {
-    console.error(err)
-
-    return res
-      .status(500)
-      .json({
-        authenticated: false,
-        message: 'Database error'
-      })
-  }
-
-  if (!result?.token_hash) {
-    clearAdminSessionCookie(res)
-
-    return res
-      .status(401)
-      .json({
-        authenticated: false,
-        message: 'Unauthenticated'
-      })
-  }
-
-  const providedHash = hashToken(token)
-  const expectedHash = result.token_hash
-
-  if (
-    providedHash.length !== expectedHash.length ||
-    !crypto.timingSafeEqual(providedHash, expectedHash)
-  ) {
-    clearAdminSessionCookie(res)
-
-    return res
-      .status(401)
-      .json({
-        authenticated: false,
-        message: 'Unauthenticated'
-      })
-  }
-  
-  // Check if admin session expired
-  if (Date.now() > new Date(result.expires_at).getTime()) {
-    // Clear admin session
-    clearAdminSessionCookie(res)
-    await deleteAdminSession()
-
-    return res
-      .status(401)
-      .json({
-        authenticated: false,
-        message: 'Unauthenticated'
-      })
-  }
-  
-
-  res.json({
-    authenticated: true,
-    message: 'Authentication successful'
-  })
-}
-
-export async function requireAdmin(req, res, next) {
-  const cookieToken = req.cookies?.[getAdminSessionCookieName()]
-  const header = req.get('Authorization')
-
-  let token = cookieToken
-
-  if (!token && header?.startsWith('Bearer ')) {
-    token = header.slice(7)
-  }
-
-  if (!token) {
-    return res.status(401).json({
-      message: 'Authentication required'
-    })
+    result.clearCookie = false
+    return result
   }
 
   try {
@@ -189,11 +126,7 @@ export async function requireAdmin(req, res, next) {
     const session = rows[0]
 
     if (!session?.token_hash || !session.expires_at) {
-      clearAdminSessionCookie(res)
-
-      return res.status(401).json({
-        message: 'Unauthenticated'
-      })
+      return result
     }
 
     const expectedHash = session.token_hash
@@ -207,39 +140,76 @@ export async function requireAdmin(req, res, next) {
       expectedHash.length !== providedHash.length ||
       !crypto.timingSafeEqual(expectedHash, providedHash)
     ) {
-      clearAdminSessionCookie(res)
-
-      return res.status(401).json({
-        message: 'Unauthenticated'
-      })
+      return result
     }
 
     // Check if admin session is expired
-    if (Date.now() > new Date(session.expires_at).getTime()) {
-      await deleteAdminSession()
-      clearAdminSessionCookie(res)
-      return res.status(401).json({
-        message: 'Session expired'
-      })
+    if (!isFutureDate(session.expires_at)) {
+      result.clearSession = true
+      result.message = 'Session expired'
+      return result
     }
 
-    next()
+    return {
+      authenticated: true,
+      message: 'Authentication successful'
+    }
   }
   catch (err) {
     console.error(err)
 
-    return res.status(500).json({
-      message: 'Database error'
+    result.clearCookie = false
+    result.status = 500
+    result.message = 'Internal authentication error'
+    return result
+  }
+}
+
+async function cleanupAdminSession(session, res) {
+  if (session.clearCookie) {
+    clearAdminSessionCookie(res)
+  }
+  if (session.clearSession) {
+    await deleteAdminSession()
+  }
+}
+
+export async function isAdminAuthenticated(req, res) {
+  const session = await validateAdminSession(req)
+
+  if (!session.authenticated) {
+    await cleanupAdminSession(session, res)
+
+    return res.status(session.status).json({
+      authenticated: false,
+      message: session.message
     })
   }
+  return res.status(200).json({
+    authenticated: true,
+    message: session.message
+  })
+}
+
+export async function requireAdmin(req, res, next) {
+  const session = await validateAdminSession(req)
+  if (!session.authenticated) {
+    await cleanupAdminSession(session, res)
+
+    return res.status(session.status).json({
+      authenticated: false,
+      message: session.message
+    })
+  }
+  next()
 }
 
 export async function registerUser(req, res) {
   try {
-    // 1. Read request body
+    // Read request body
     const { username, email, password } = req.body ?? {}
   
-    // 2. Validate that supplied credentials are valid for their respective fields
+    // Validate that supplied credentials are valid for their respective fields
     const validationResults = await validateRegistration(username, email, password)
   
     if (!validationResults.success) {
@@ -248,36 +218,36 @@ export async function registerUser(req, res) {
       })
     }
   
-    // 3. Hash password
-    const password_hash = await hashPassword(password)
+    // Hash password
+    const passwordHash = await hashPassword(password)
   
-    // 4. Create user
+    // Create user
     const normalizedUsername = validationResults.username
     const normalizedEmail = validationResults.email
     const creationResults = await createUser(
       normalizedUsername,
       normalizedEmail,
-      password_hash
+      passwordHash
     )
   
-    // 5. Make sure user was created
+    // Make sure user was created
     if (!creationResults.success) {
       return res.status(creationResults.status ?? 500).json({
         message: creationResults.message
       })
     }
 
-    // 6. Create session
+    // Create session
     const sessionResults = await createSession(creationResults.userId)
 
-    // 7. Make sure session was created
+    // Make sure session was created
     if (!sessionResults.success) {
       return res.status(201).json({
         message: 'Account created successfully, but you could not be signed in automatically. Please log in.'
       })
     }
   
-    // 8. Registration completed and session created successfully
+    // Registration completed and session created successfully
     return res
       .status(201)
       .cookie(
@@ -397,7 +367,7 @@ async function validateRegistration(username, email, password) {
   return result
 }
 
-async function createUser(username, email, password_hash) {
+async function createUser(username, email, passwordHash) {
   const result = {
     success: false,
     message: 'Failed to add user'
@@ -409,7 +379,7 @@ async function createUser(username, email, password_hash) {
       INSERT INTO users
         (username, email, password_hash)
       VALUES (?, ?, ?);`,
-      [username, email, password_hash]
+      [username, email, passwordHash]
     )
   
     // 2. Verify that the user was added
@@ -480,13 +450,22 @@ async function createSession(userId) {
   }
 }
 
-async function getValidSession(token) {
+async function validateSession(req) {
   const result = {
     authenticated: false,
     message: 'Not authorized',
     status: 401,
-    deleteSession: false,
+    clearSession: false,
     clearCookie: true
+  }
+
+  // Read cookie
+  const token = req.cookies?.[getSessionCookieName()]
+
+  // Make sure session cookie exists
+  if (!token) {
+    result.clearCookie = false
+    return result
   }
 
   try {
@@ -515,10 +494,10 @@ async function getValidSession(token) {
 
     // Check if session is expired
     const expiration = session.expires_at
-    if (new Date(expiration).getTime() <= Date.now()) {
+    if (!isFutureDate(expiration)) {
       
       // Pass information along so the session may be deleted
-      result.deleteSession = true
+      result.clearSession = true
       result.sessionId = session.id
 
       // Return 401 failure
@@ -537,10 +516,10 @@ async function getValidSession(token) {
     console.error(err.message)
     return {
       authenticated: false,
-      message: 'Failed to communicate with database',
+      message: 'Internal authentication error',
       status: 500,
       clearCookie: false,
-      deleteSession: false,
+      clearSession: false,
     }
   }
 }
@@ -559,19 +538,8 @@ export function authenticateSession(req, res) {
 }
 
 export async function requireUser(req, res, next) {
-  // Read cookie
-  const token = req.cookies?.[getSessionCookieName()]
-
-  // Make sure session cookie exists
-  if (!token) {
-    return res.status(401).json({
-      authenticated: false,
-      message: 'Not authorized'
-    })
-  }
-
   // Validate session
-  const sessionResults = await getValidSession(token)
+  const sessionResults = await validateSession(req)
 
   // Check if session is authenticated
   if (!sessionResults.authenticated) {
@@ -582,7 +550,7 @@ export async function requireUser(req, res, next) {
     }
 
     // Delete session if expired
-    if (sessionResults.deleteSession) {
+    if (sessionResults.clearSession) {
       await deleteSession(sessionResults.sessionId)
     }
   
@@ -600,6 +568,115 @@ export async function requireUser(req, res, next) {
     username: sessionResults.username
   }
   next()
+}
+
+async function verifyUser(username, password) {
+  const result = {
+    success: false,
+    status: 400,
+    message: null
+  }
+
+  // Check that username and password are strings
+  if (typeof username !== 'string' || typeof password !== 'string') {
+    result.message = 'Username or password were of invalid type'
+    return result
+  }
+
+  // Save trimmed version of username
+  const trimmedUsername = username.trim()
+
+  // Check if username or password are blank
+  if (trimmedUsername === '') {
+    result.message = 'Username is required'
+    return result
+  }
+  if (password.trim() === '') {
+    result.message = 'Password is required'
+    return result
+  }
+
+  // Check lengths
+  result.status = 401
+  result.message = 'Invalid username or password'
+  if (!isStringLengthBetween(USERNAME_LEN_REQ.min, USERNAME_LEN_REQ.max, trimmedUsername)) {
+    return result
+  }
+  if (!isStringLengthBetween(PASSWORD_LEN_REQ.min, PASSWORD_LEN_REQ.max, password)) {
+    return result
+  }
+
+  try {
+    // Get user id and hashed password from the database
+    const [rows] = await pool.query(
+      `
+        SELECT id, password_hash
+        FROM users
+        WHERE username = ?  
+      `,
+    [trimmedUsername])
+    
+    // Check that user exists
+    const user = rows?.[0]
+    if (!user) {
+      // Do a dummy argon2 comparison to limit timing-based username enumeration
+      await dummyArgon2compare(password)
+      return result
+    }
+
+    // Check that password is correct
+    const comparison = await argon2compare(user.password_hash, password)
+    if (comparison.succeeded) {
+      if (!comparison.match) {
+        return result
+      }
+    } else {
+      // Password hash is possibly malformed
+      result.status = 500
+      result.message = 'Internal authentication error'
+      return result
+    }
+
+    return {
+      success: true,
+      userId: user.id
+    }
+  }
+  catch (err) {
+    console.error(err.message)
+
+    result.status = 500
+    result.message = 'Internal authentication error'
+    return result
+  }
+}
+
+export async function loginUser(req, res) {
+  const { username, password } = req.body ?? {}
+
+  // Verify username and password are valid
+  const verification = await verifyUser(username, password)
+  if (!verification.success) {
+    return res.status(verification.status).json({
+      message: verification.message
+    })
+  }
+
+  // Create user session
+  const sessionResults = await createSession(verification.userId)
+  if (!sessionResults.success) {
+    return res.status(500).json({
+      message: sessionResults.message
+    })
+  }
+
+  // Send cookie to browser
+  return res
+    .status(200)
+    .cookie(getSessionCookieName(), sessionResults.token, COOKIE_OPTIONS)
+    .json({
+      message: 'User session created'
+    })
 }
 
 //// HELPER FUNCTIONS ////
@@ -625,10 +702,10 @@ function hashToken(token) {
 }
 
 async function hashPassword(password) {
-  const password_hash = await argon2.hash(password, {
+  const passwordHash = await argon2.hash(password, {
     type: argon2.argon2id
   })
-  return password_hash
+  return passwordHash
 }
 
 function clearSessionCookie(res) {
@@ -663,5 +740,34 @@ async function deleteAdminSession() {
   }
   catch (err) {
     console.error(err.message)
+  }
+}
+
+async function argon2compare(passwordHash, password) {
+  try {
+    const match = await argon2.verify(passwordHash, password)
+    return {
+      succeeded: true,
+      match
+    }
+  }
+  catch (err) {
+    console.error(err.message)
+
+    // Run a dummy comparison to limit timing-based password enumeration
+    await dummyArgon2compare(password)
+
+    return {
+      succeeded: false,
+    }
+  }
+}
+
+async function dummyArgon2compare(password) {
+  try {
+    await argon2.verify(DUMMY_HASH, password)
+  }
+  catch (err) {
+    console.error(err)
   }
 }
